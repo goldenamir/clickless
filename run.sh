@@ -1,5 +1,5 @@
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
-source .venv/bin/activate
-exec python3 main.py "$@"
+export PATH="$HOME/.local/bin:$PATH"
+exec poetry run python3 main.py "$@"
