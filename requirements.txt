@@ -1,0 +1,4 @@
+pyyaml
+evdev
+pycairo
+PyGObject

@@ -1,5 +1,11 @@
 __pycache__/
 *.py[cod]
+*.pyc
 .venv/
 .venv-*/
 macos/.venv-macos/
+*.egg-info/
+.eggs/
+dist/
+build/
+main_old.py
