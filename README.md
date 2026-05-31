@@ -1,50 +1,57 @@
 # Clickless
 
-Free keyboard-driven mouse control, split by platform.
+Free keyboard-driven mouse control for Linux. Inspired by [Mouseless](https://www.mouseless.click) and [mousemaster](https://github.com/petoncle/mousemaster).
 
-Open the folder for your operating system:
+## Features
 
-| Platform | Folder | Start here |
-|----------|--------|------------|
-| macOS | `macos/` | `macos/README.md` |
-| Linux X11 | `linux/` | `linux/README.md` |
-| External ideas | `integrations/` | `integrations/README.md` |
+- **Grid overlay** — Shift tap to activate. Press IJKL to shrink the grid directionally (binary search). Space to click at grid center.
+- **Free mode** — Ctrl tap to activate. IJKL for continuous mouse movement with easing. Space to click.
+- **Multi-monitor** — Shift tap cycles monitors while overlay is open.
+- **Modifier clicks** — Hold Shift for right-click, Alt for move-only, Alt+Shift for drag & drop.
+- **Scrolling** — Arrow keys scroll while overlay is open. M/, in free mode.
 
-## Quick Start
-
-macOS:
+## Install
 
 ```bash
-cd macos
 ./install.sh
+```
+
+## Run
+
+```bash
 ./run.sh
 ```
 
-Linux:
+## Safety
 
-```bash
-cd linux
-./install.sh
-./run.sh
-```
+Hold **both Shift keys** for 1 second to emergency ungrab the keyboard and exit.
 
-## Default Keys
+## Keys (Grid Overlay)
 
 | Key | Action |
 |-----|--------|
-| Shift tap | Show/cycle grid overlay |
-| Ctrl tap | Toggle free mouse mode |
-| I / J / K / L | Move/refine cursor |
-| Space | Click |
-| Escape | Close overlay / exit mode |
-| Both Shift keys for 1 second | Emergency stop |
+| Shift tap | Show/cycle monitor |
+| I / K / J / L | Shrink grid: up / down / left / right |
+| Space | Click at grid center |
+| Backspace | Undo last shrink |
+| Escape | Close overlay |
 
-See the platform README for system permissions and dependencies.
+## Keys (Free Mode)
 
-## Integrations
+| Key | Action |
+|-----|--------|
+| Ctrl tap | Toggle free mode |
+| I / K / J / L | Move mouse: up / down / left / right |
+| S / D / F | Speed boost (stackable) |
+| A | Slow down |
+| Space | Click + exit |
 
-`integrations/handy` is a Git submodule for exploring voice control through Handy's offline speech-to-text app. Clone with submodules when you want that folder populated:
+## Requirements
 
-```bash
-git clone --recurse-submodules https://github.com/goldenamir/clickless.git
-```
+- Linux with X11
+- Python 3.10+
+- GTK 3, PyGObject, xdotool
+
+## License
+
+MIT
