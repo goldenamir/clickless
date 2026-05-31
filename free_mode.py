@@ -281,7 +281,10 @@ class FreeMode:
 
     def _stop_tick(self):
         if self._tick_id is not None:
-            GLib.source_remove(self._tick_id)
+            try:
+                GLib.source_remove(self._tick_id)
+            except Exception:
+                pass
             self._tick_id = None
 
     def _tick(self):

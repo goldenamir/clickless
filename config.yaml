@@ -85,7 +85,7 @@ behavior:
   # Overlay / cursor
   initial_overlay_monitor: "primary"
   initial_action_location: "virtual_cursor"   # virtual_cursor | system_cursor | screen_center
-  grid_action_level: "2"                # subgrid | 2 | 1
+  grid_action_level: "subgrid"          # subgrid | 2 | 1
   hide_cursor_on_click: false
   hide_location: "bottom_left"
   continuous_mode: false
