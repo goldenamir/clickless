@@ -98,7 +98,7 @@ behavior:
 
   # Free mode
   free_mode:
-    base_move_speed: 8
+    base_move_speed: 0.7
     move_speed_multiplier: 2.5
     movement_easing_factor: 0.2
     base_wheel_speed: 5
