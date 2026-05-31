@@ -64,12 +64,12 @@ keybindings:
 grid:
   configs:
     - name: "default"
-      level1_columns: 5
-      level1_rows: 5
-      level1_keys: "ASDFGHJKLQWERTYUIOPZXCVBN"
-      level2_columns: 5
-      level2_rows: 5
-      level2_keys: "ASDFGHJKLQWERTYUIOPZXCVBN"
+      level1_columns: 10
+      level1_rows: 3
+      level1_keys: "QWERTYUIOPASDFGHJKL;ZXCVBNM,./"
+      level2_columns: 10
+      level2_rows: 3
+      level2_keys: "QWERTYUIOPASDFGHJKL;ZXCVBNM,./"
       subgrid_columns: 3
       subgrid_rows: 3
       subgrid_keys: "UIOJKLM,."
@@ -85,7 +85,7 @@ behavior:
   # Overlay / cursor
   initial_overlay_monitor: "primary"
   initial_action_location: "virtual_cursor"   # virtual_cursor | system_cursor | screen_center
-  grid_action_level: "subgrid"          # subgrid | 2 | 1
+  grid_action_level: "2"               # subgrid | 2 | 1
   hide_cursor_on_click: false
   hide_location: "bottom_left"
   continuous_mode: false
