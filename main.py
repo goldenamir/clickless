@@ -385,12 +385,12 @@ class Clickless:
             # Ctrl tap → deactivate free mode (toggle off)
             if is_tap and code in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
                 GLib.idle_add(self.free_mode.deactivate)
-                return True
+                return False  # Forward key-up so Ctrl doesn't stay stuck in uinput
 
             # Shift tap → show overlay (works FROM free mode)
             if is_tap and code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
                 GLib.idle_add(self.overlay.show_overlay)
-                return True
+                return False  # Forward key-up so Shift doesn't stay stuck in uinput
 
             return consumed
 
@@ -399,11 +399,11 @@ class Clickless:
             # Shift tap → show overlay
             if code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
                 GLib.idle_add(self.overlay.show_overlay)
-                return True
+                return False  # Forward key-up so Shift doesn't stay stuck in uinput
             # Ctrl tap → activate free mode
             if code in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
                 GLib.idle_add(self.free_mode.activate)
-                return True
+                return False  # Forward key-up so Ctrl doesn't stay stuck in uinput
 
         return False
 
