@@ -334,11 +334,18 @@ class Clickless:
         # ── Free mode active: consume movement keys ──
         if self.free_mode.active:
             key_name = EVDEV_CODE_NAMES.get(code, '')
+            # Space → click and exit free mode
+            if code == ecodes.KEY_SPACE:
+                self.free_mode.on_key_down(key_name)  # performs click
+                self.free_mode.active = False  # stop consuming keys immediately
+                GLib.idle_add(self.free_mode.finish_deactivate)
+                return True
             if self.free_mode.on_key_down(key_name):
                 return True  # Movement/action key consumed
             # Escape → deactivate free mode
             if code == ecodes.KEY_ESC:
-                GLib.idle_add(self.free_mode.deactivate)
+                self.free_mode.active = False  # stop consuming keys immediately
+                GLib.idle_add(self.free_mode.finish_deactivate)
                 return True
             # Other keys pass through (typing still works for non-free-mode keys)
             return False
@@ -384,7 +391,8 @@ class Clickless:
 
             # Ctrl tap → deactivate free mode (toggle off)
             if is_tap and code in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
-                GLib.idle_add(self.free_mode.deactivate)
+                self.free_mode.active = False  # stop consuming keys immediately
+                GLib.idle_add(self.free_mode.finish_deactivate)
                 return False  # Forward key-up so Ctrl doesn't stay stuck in uinput
 
             # Shift tap → show overlay (works FROM free mode)

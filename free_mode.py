@@ -150,6 +150,16 @@ class FreeMode:
         self._indicator.flash_off()
         print("Free mode OFF")
 
+    def finish_deactivate(self):
+        """GTK-thread cleanup after active flag was already cleared."""
+        self._stop_tick()
+        self.move_keys.clear()
+        self.speed_keys.clear()
+        self.scroll_keys.clear()
+        self._indicator.flash_off()
+        print("Free mode OFF")
+        return False  # Don't repeat GLib idle callback
+
     def toggle(self):
         if self.active:
             self.deactivate()
