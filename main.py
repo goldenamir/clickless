@@ -352,9 +352,15 @@ class Clickless:
 
         # ── Overlay visible ──
         if self.overlay.is_visible:
-            # Shift tap → hide overlay (toggle off)
+            # Shift tap → cycle monitors (multi-monitor) or hide (single monitor)
             if is_tap and code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
-                GLib.idle_add(self.overlay.hide_overlay)
+                if len(self.overlay.monitors) >= 2:
+                    if code == ecodes.KEY_RIGHTSHIFT:
+                        GLib.idle_add(self.overlay.move_to_next_monitor)
+                    else:
+                        GLib.idle_add(self.overlay.move_to_prev_monitor)
+                else:
+                    GLib.idle_add(self.overlay.hide_overlay)
                 return True
             # Modifier state updates
             if code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):

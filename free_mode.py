@@ -5,9 +5,92 @@ without the overlay, similar to Mouseless's free mode.
 """
 
 import gi
+gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
-from gi.repository import GLib
+from gi.repository import Gtk, Gdk, GLib
+import cairo
+import math
 import time
+
+
+class FreeModeIndicator(Gtk.Window):
+    """Small on-screen indicator showing free mode state."""
+
+    def __init__(self):
+        super().__init__(type=Gtk.WindowType.POPUP)
+        self.set_app_paintable(True)
+        self.set_decorated(False)
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
+        self.set_keep_above(True)
+        self.set_type_hint(Gdk.WindowTypeHint.DOCK)
+        self.stick()
+
+        screen = self.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual:
+            self.set_visual(visual)
+
+        self._width = 150
+        self._height = 32
+        self._text = "FREE MODE"
+        self._color = (0.3, 1.0, 0.5, 0.9)
+        self.set_default_size(self._width, self._height)
+        self._position_on_screen()
+
+        self.connect('draw', self._on_draw)
+        self.connect('realize', self._make_click_through)
+
+    def _position_on_screen(self):
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        geom = monitor.get_geometry()
+        self.move(geom.x + (geom.width - self._width) // 2, geom.y + 8)
+
+    def _make_click_through(self, widget):
+        region = cairo.Region(cairo.RectangleInt(0, 0, 0, 0))
+        self.get_window().input_shape_combine_region(region, 0, 0)
+
+    def _on_draw(self, widget, cr):
+        w, h = self._width, self._height
+        r = 10
+
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.new_sub_path()
+        cr.arc(w - r, r, r, -math.pi / 2, 0)
+        cr.arc(w - r, h - r, r, 0, math.pi / 2)
+        cr.arc(r, h - r, r, math.pi / 2, math.pi)
+        cr.arc(r, r, r, math.pi, 3 * math.pi / 2)
+        cr.close_path()
+        cr.set_source_rgba(0.08, 0.08, 0.12, 0.85)
+        cr.fill()
+
+        cr.set_operator(cairo.OPERATOR_OVER)
+        cr.select_font_face('monospace', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(14)
+        ext = cr.text_extents(self._text)
+        cr.move_to((w - ext.width) / 2, (h + ext.height) / 2)
+        cr.set_source_rgba(*self._color)
+        cr.show_text(self._text)
+        return False
+
+    def show_on(self):
+        self._text = "FREE MODE"
+        self._color = (0.3, 1.0, 0.5, 0.9)
+        self.show_all()
+        self.queue_draw()
+
+    def flash_off(self):
+        """Briefly show 'FREE MODE OFF' then hide."""
+        self._text = "FREE MODE OFF"
+        self._color = (1.0, 0.4, 0.3, 0.9)
+        self.show_all()
+        self.queue_draw()
+        GLib.timeout_add(800, self._hide_after_flash)
+
+    def _hide_after_flash(self):
+        self.hide()
+        return False
 
 
 class FreeMode:
@@ -17,6 +100,7 @@ class FreeMode:
         self.mouse = mouse_ctrl
         self.active = False
         self._load_config(config)
+        self._indicator = FreeModeIndicator()
 
         # Movement state
         self.move_keys = set()     # currently held movement keys
@@ -52,6 +136,7 @@ class FreeMode:
         self.speed_dec = False
         self.move_velocity = [0.0, 0.0]
         self._start_tick()
+        self._indicator.show_on()
         print("Free mode ON")
 
     def deactivate(self):
@@ -62,6 +147,7 @@ class FreeMode:
         self.move_keys.clear()
         self.speed_keys.clear()
         self.scroll_keys.clear()
+        self._indicator.flash_off()
         print("Free mode OFF")
 
     def toggle(self):
