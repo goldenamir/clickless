@@ -1,15 +1,13 @@
-"""Clickless - Transparent GTK overlay with multi-level grid mouse control
+"""Clickless - Transparent GTK overlay with 2-letter hint grid
 
 Supports:
-- Level 1 grid (cell selection)
-- Optional level 2 grid
-- Subgrid for precision
-- Subgrid nudges
+- 2-letter hint grid: screen is covered with labeled cells, type 2 letters
+  to jump cursor there. Then IJKL to refine position directionally.
+- Virtual cursor display
 - Drag & drop
 - Multi-monitor
 - Modifier clicks
 - Continuous mode
-- Virtual cursor display
 """
 
 import gi
@@ -35,20 +33,34 @@ class GridOverlay(Gtk.Window):
         self.locked = False
         self.continuous_mode = False
 
-        # Grid selection state
-        self.level = 0              # 0=no selection, 1=level1 selected, 2=level2 selected, 3=subgrid
-        self.selected_keys = []     # keys typed so far
-        self.selected_cell = None   # (row, col) at level 1
-        self.selected_l2 = None     # (row, col) at level 2
-        self.virtual_cursor = None  # (screen_x, screen_y) absolute
-        self.virtual_cursor_local = None  # (x, y) relative to overlay
+        # Phase: 'hints' → typing first letter
+        #        'filtered' → first letter typed, typing second
+        #        'refine' → cell selected, IJKL to fine-tune
+        self.phase = 'hints'
+        self.first_letter = None
+        self.selected_keys = []
 
-        # Nudge state
-        self.nudge_held_key = None
-        self.nudge_offset = (0, 0)
+        # Hint grid data (generated on show)
+        self.hint_cols = 0
+        self.hint_rows = 0
+        self.hint_cell_w = 0
+        self.hint_cell_h = 0
+        self.hint_labels = {}    # (row, col) → "XY"
+        self.hint_reverse = {}   # "XY" → (row, col)
+        self.row_keys = ''       # first-letter chars (one per row)
+        self.col_keys = ''       # second-letter chars (one per col)
+
+        # Refinement state (directional shrinking after hint selection)
+        self.sub_rect = [0, 0, 0, 0]
+        self.sub_level = 0
+        self.shrink_keys = {'I': 'up', 'K': 'down', 'J': 'left', 'L': 'right'}
+
+        # Cursor
+        self.virtual_cursor = None
+        self.virtual_cursor_local = None
 
         # Action state
-        self.action_type = 'click'  # click | move | drag
+        self.action_type = 'click'
         self.mouse_button = 'left'
         self.click_count = 1
         self.last_click_time = 0
@@ -74,7 +86,6 @@ class GridOverlay(Gtk.Window):
             print(f"DEBUG: RGBA visual set OK")
         else:
             print(f"DEBUG: NO RGBA visual - transparency won't work!")
-            # Try compositing check
             print(f"DEBUG: Screen is composited: {screen.is_composited()}")
 
         self._apply_monitor_geometry()
@@ -86,90 +97,32 @@ class GridOverlay(Gtk.Window):
     # ── Config loading ───────────────────────────────────────────
 
     def _load_config(self):
-        grid_cfgs = self.config.get('grid', {}).get('configs', [{}])
-        self.grid_configs = grid_cfgs
-        self.active_grid = grid_cfgs[0] if grid_cfgs else {}
-
-        g = self.active_grid
-        self.l1_cols = g.get('level1_columns', 10)
-        self.l1_rows = g.get('level1_rows', 9)
-        self.l1_keys = g.get('level1_keys', 'ASDFGHJKLQWERTYUIOP').upper()
-        self.l2_cols = g.get('level2_columns', 0)
-        self.l2_rows = g.get('level2_rows', 0)
-        self.l2_keys = g.get('level2_keys', '').upper()
-        self.sg_cols = g.get('subgrid_columns', 3)
-        self.sg_rows = g.get('subgrid_rows', 3)
-        self.sg_keys = g.get('subgrid_keys', 'UIOJKLM,.').upper()
-        self.always_show_subgrid = g.get('always_show_subgrid', False)
-        self.hold_for_nudge = g.get('hold_subgrid_key_for_nudge', True)
-        self.nudges_per_cell = g.get('nudges_per_cell', 4)
-
-        self.has_l2 = self.l2_cols > 0 and self.l2_rows > 0
-
-        # Build key-to-position maps for level 1
-        self.l1_key_map = {}
-        idx = 0
-        for r in range(self.l1_rows):
-            for c in range(self.l1_cols):
-                if idx < len(self.l1_keys):
-                    self.l1_key_map[self.l1_keys[idx]] = (r, c)
-                    idx += 1
-
-        # Level 2 key map
-        self.l2_key_map = {}
-        if self.has_l2 and self.l2_keys:
-            idx = 0
-            for r in range(self.l2_rows):
-                for c in range(self.l2_cols):
-                    if idx < len(self.l2_keys):
-                        self.l2_key_map[self.l2_keys[idx]] = (r, c)
-                        idx += 1
-
-        # Subgrid key map
-        self.sg_key_map = {}
-        idx = 0
-        for r in range(self.sg_rows):
-            for c in range(self.sg_cols):
-                if idx < len(self.sg_keys):
-                    self.sg_key_map[self.sg_keys[idx]] = (r, c)
-                    idx += 1
-
         # Style
         s = self.config.get('style', {})
         self.master_opacity = s.get('master_opacity', 1.0)
         self.overlay_opacity = s.get('overlay_opacity', 0.22)
         self.grid_color = s.get('grid_line_color', [0.3, 0.8, 0.5, 0.35])
-        self.subgrid_color = s.get('subgrid_line_color', [0.3, 0.8, 0.5, 0.2])
         self.text_color = s.get('text_color', [1, 1, 1, 0.85])
-        self.sg_text_color = s.get('subgrid_text_color', [1, 1, 1, 0.6])
         self.highlight_color = s.get('highlight_color', [0, 1, 0.53, 0.25])
-        self.highlight_anim_ms = s.get('highlight_animation_ms', 100)
         self.grid_line_width = s.get('grid_line_width', 1)
         self.font_name = s.get('font', 'monospace')
         self.font_weight = s.get('font_weight', 'bold')
         self.font_size_mult = s.get('font_size_multiplier', 1.0)
-        self.sg_font_size_mult = s.get('subgrid_font_size_multiplier', 0.8)
         self.cursor_size = s.get('cursor_size', 12)
         self.cursor_color = s.get('cursor_color', [1, 0.3, 0.3, 0.85])
         self.cursor_right_color = s.get('cursor_right_button_color', [0.3, 0.5, 1, 0.85])
         self.cursor_move_color = s.get('cursor_move_color', [0.3, 1, 0.5, 0.85])
         self.cursor_drag_color = s.get('cursor_drag_color', [1, 0.8, 0.2, 0.85])
         self.text_shadow = s.get('text_shadow_rgba', [0, 0, 0, 0.5])
-        self.bg_colors = s.get('background_colors', ['#1a1a2e'])
 
         # Behavior
         b = self.config.get('behavior', {})
-        self.action_level = b.get('grid_action_level', 'subgrid')
         self.hide_cursor_on_click = b.get('hide_cursor_on_click', False)
         self.hide_location = b.get('hide_location', 'bottom_left')
         self.move_duration = b.get('move_duration_ms', 80)
         self.multi_click_threshold = b.get('multi_click_threshold_ms', 300)
         self.continuous_mode = b.get('continuous_mode', False)
         self.initial_action_loc = b.get('initial_action_location', 'virtual_cursor')
-
-        # Keybindings
-        kb = self.config.get('keybindings', {})
-        self.kb = kb
 
     # ── Monitor management ───────────────────────────────────────
 
@@ -207,7 +160,6 @@ class GridOverlay(Gtk.Window):
             return
         self.current_monitor_idx = (self.current_monitor_idx + 1) % len(self.monitors)
         self._apply_monitor_geometry()
-        self._load_grid_for_monitor()
         self._reset_state()
         self.queue_draw()
 
@@ -216,54 +168,8 @@ class GridOverlay(Gtk.Window):
             return
         self.current_monitor_idx = (self.current_monitor_idx - 1) % len(self.monitors)
         self._apply_monitor_geometry()
-        self._load_grid_for_monitor()
         self._reset_state()
         self.queue_draw()
-
-    def _load_grid_for_monitor(self):
-        mode = self.config.get('grid', {}).get('monitor_assignment_mode', 'auto')
-        m = self.monitors[self.current_monitor_idx]
-
-        if mode == 'single' or len(self.grid_configs) < 2:
-            self.active_grid = self.grid_configs[0]
-        elif mode == 'auto':
-            is_horizontal = m['w'] >= m['h']
-            self.active_grid = self.grid_configs[0] if is_horizontal else self.grid_configs[min(1, len(self.grid_configs)-1)]
-        elif mode == 'custom':
-            assignments = self.config.get('grid', {}).get('custom_monitor_assignments', '')
-            names = [n.strip() for n in assignments.split(',') if n.strip()]
-            if self.current_monitor_idx < len(names):
-                target = names[self.current_monitor_idx]
-                for gc in self.grid_configs:
-                    if gc.get('name', '') == target:
-                        self.active_grid = gc
-                        break
-
-        # Reload grid params
-        g = self.active_grid
-        self.l1_cols = g.get('level1_columns', 10)
-        self.l1_rows = g.get('level1_rows', 9)
-        self.l1_keys = g.get('level1_keys', 'ASDFGHJKLQWERTYUIOP').upper()
-        self.sg_cols = g.get('subgrid_columns', 3)
-        self.sg_rows = g.get('subgrid_rows', 3)
-        self.sg_keys = g.get('subgrid_keys', 'UIOJKLM,.').upper()
-
-        # Rebuild key maps
-        self.l1_key_map = {}
-        idx = 0
-        for r in range(self.l1_rows):
-            for c in range(self.l1_cols):
-                if idx < len(self.l1_keys):
-                    self.l1_key_map[self.l1_keys[idx]] = (r, c)
-                    idx += 1
-
-        self.sg_key_map = {}
-        idx = 0
-        for r in range(self.sg_rows):
-            for c in range(self.sg_cols):
-                if idx < len(self.sg_keys):
-                    self.sg_key_map[self.sg_keys[idx]] = (r, c)
-                    idx += 1
 
     # ── Show / hide ──────────────────────────────────────────────
 
@@ -274,6 +180,7 @@ class GridOverlay(Gtk.Window):
             self.show_overlay()
 
     def show_overlay(self):
+        self._generate_hints()
         self._reset_state()
         self.is_visible = True
         self.show_all()
@@ -288,17 +195,39 @@ class GridOverlay(Gtk.Window):
         self.hide()
 
     def _reset_state(self):
-        self.level = 0
+        self.phase = 'hints'
+        self.first_letter = None
         self.selected_keys = []
-        self.selected_cell = None
-        self.selected_l2 = None
+        self.sub_rect = [0, 0, self.screen_w, self.screen_h]
+        self.sub_level = 0
         self.virtual_cursor = None
         self.virtual_cursor_local = None
-        self.nudge_held_key = None
-        self.nudge_offset = (0, 0)
         self.action_type = 'click'
         self.mouse_button = 'left'
         self.click_count = 1
+
+    def _generate_hints(self):
+        """Generate 2-letter labels for grid cells.
+        First letter = row, second letter = column."""
+        keys = 'ASDFGHJKLQWERTYUIOPZXCVBNM'
+        target_cell_w = 80
+        target_cell_h = 55
+
+        self.hint_cols = min(len(keys), max(4, int(self.screen_w / target_cell_w)))
+        self.hint_rows = min(len(keys), max(3, int(self.screen_h / target_cell_h)))
+        self.hint_cell_w = self.screen_w / self.hint_cols
+        self.hint_cell_h = self.screen_h / self.hint_rows
+
+        self.row_keys = keys[:self.hint_rows]
+        self.col_keys = keys[:self.hint_cols]
+
+        self.hint_labels = {}
+        self.hint_reverse = {}
+        for r in range(self.hint_rows):
+            for c in range(self.hint_cols):
+                label = self.row_keys[r] + self.col_keys[c]
+                self.hint_labels[(r, c)] = label
+                self.hint_reverse[label] = (r, c)
 
     def _grab_keyboard(self):
         window = self.get_window()
@@ -323,105 +252,22 @@ class GridOverlay(Gtk.Window):
         seat = display.get_default_seat()
         seat.ungrab()
 
-    # ── Coordinate math ──────────────────────────────────────────
-
-    def _cell_rect(self, row, col):
-        """Return (x, y, w, h) for a level-1 cell in local coords."""
-        cw = self.screen_w / self.l1_cols
-        ch = self.screen_h / self.l1_rows
-        return col * cw, row * ch, cw, ch
-
-    def _subcell_center(self, cell_row, cell_col, sg_row, sg_col):
-        """Return (local_x, local_y) for subgrid cell center."""
-        cx, cy, cw, ch = self._cell_rect(cell_row, cell_col)
-        scw = cw / self.sg_cols
-        sch = ch / self.sg_rows
-        lx = cx + sg_col * scw + scw / 2
-        ly = cy + sg_row * sch + sch / 2
-        return lx, ly
-
     def _local_to_screen(self, lx, ly):
         return int(self.screen_x + lx), int(self.screen_y + ly)
-
-    def _cell_center(self, row, col):
-        cx, cy, cw, ch = self._cell_rect(row, col)
-        return cx + cw / 2, cy + ch / 2
-
-    def _l2_cell_rect(self, l1_row, l1_col, l2_row, l2_col):
-        """Return (x, y, w, h) for a level-2 cell inside a level-1 cell."""
-        cx, cy, cw, ch = self._cell_rect(l1_row, l1_col)
-        scw = cw / self.l2_cols
-        sch = ch / self.l2_rows
-        return cx + l2_col * scw, cy + l2_row * sch, scw, sch
-
-    def _l2_cell_center(self, l1_row, l1_col, l2_row, l2_col):
-        """Return (local_x, local_y) center of a level-2 cell."""
-        x, y, w, h = self._l2_cell_rect(l1_row, l1_col, l2_row, l2_col)
-        return x + w / 2, y + h / 2
 
     # ── Drawing ──────────────────────────────────────────────────
 
     def _on_draw(self, widget, cr):
-        cw = self.screen_w / self.l1_cols
-        ch = self.screen_h / self.l1_rows
-
         # Background
         cr.set_operator(cairo.OPERATOR_SOURCE)
         cr.set_source_rgba(0, 0, 0, self.overlay_opacity * self.master_opacity)
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
 
-        font_size = max(10, min(cw, ch) * 0.25 * self.font_size_mult)
-        weight = cairo.FONT_WEIGHT_BOLD if self.font_weight == 'bold' else cairo.FONT_WEIGHT_NORMAL
-        cr.select_font_face(self.font_name, cairo.FONT_SLANT_NORMAL, weight)
-        cr.set_font_size(font_size)
-
-        for r in range(self.l1_rows):
-            for c in range(self.l1_cols):
-                x, y, w, h = self._cell_rect(r, c)
-                key_idx = r * self.l1_cols + c
-                key_char = self.l1_keys[key_idx] if key_idx < len(self.l1_keys) else '?'
-
-                is_selected = (self.selected_cell == (r, c))
-                is_highlighted = False
-
-                if self.level == 0:
-                    # No selection yet — show all cells
-                    pass
-                elif self.level >= 1 and self.selected_cell is not None:
-                    if is_selected:
-                        is_highlighted = True
-                    else:
-                        # Dim unselected cells
-                        cr.set_source_rgba(0, 0, 0, 0.45 * self.master_opacity)
-                        cr.rectangle(x, y, w, h)
-                        cr.fill()
-                        continue
-
-                # Highlight
-                if is_highlighted:
-                    cr.set_source_rgba(*self._apply_opacity(self.highlight_color))
-                    cr.rectangle(x, y, w, h)
-                    cr.fill()
-
-                # Grid lines
-                cr.set_source_rgba(*self._apply_opacity(self.grid_color))
-                cr.set_line_width(self.grid_line_width)
-                cr.rectangle(x, y, w, h)
-                cr.stroke()
-
-                # Draw level 2 grid or subgrid if selected
-                if is_selected and self.level >= 1:
-                    if self.has_l2:
-                        self._draw_l2_grid(cr, x, y, w, h)
-                    else:
-                        self._draw_subgrid(cr, x, y, w, h)
-                elif self.always_show_subgrid:
-                    self._draw_subgrid_faint(cr, x, y, w, h)
-
-                # Label
-                if not (is_selected and self.level >= 1):
-                    self._draw_label(cr, key_char, x, y, w, h, font_size, self.text_color)
+        if self.phase in ('hints', 'filtered'):
+            self._draw_hint_grid(cr)
+        elif self.phase == 'refine':
+            self._draw_refine(cr)
 
         # Virtual cursor
         if self.virtual_cursor_local:
@@ -429,76 +275,124 @@ class GridOverlay(Gtk.Window):
 
         return False
 
-    def _draw_l2_grid(self, cr, cx, cy, cw, ch):
-        """Draw level 2 grid (keyboard-like layout) inside a selected level 1 cell."""
-        scw = cw / self.l2_cols
-        sch = ch / self.l2_rows
-
-        l2_font_size = max(8, min(scw, sch) * 0.3 * self.font_size_mult)
+    def _draw_hint_grid(self, cr):
+        """Draw the 2-letter hint grid."""
+        cw = self.hint_cell_w
+        ch = self.hint_cell_h
+        font_size = max(9, min(cw, ch) * 0.28 * self.font_size_mult)
         weight = cairo.FONT_WEIGHT_BOLD if self.font_weight == 'bold' else cairo.FONT_WEIGHT_NORMAL
         cr.select_font_face(self.font_name, cairo.FONT_SLANT_NORMAL, weight)
-        cr.set_font_size(l2_font_size)
 
-        idx = 0
-        for r in range(self.l2_rows):
-            for c in range(self.l2_cols):
-                sx = cx + c * scw
-                sy = cy + r * sch
+        for r in range(self.hint_rows):
+            for c in range(self.hint_cols):
+                x = c * cw
+                y = r * ch
+                label = self.hint_labels.get((r, c), '')
+
+                is_match = True
+                if self.phase == 'filtered' and self.first_letter:
+                    is_match = label[0] == self.first_letter
+
+                if not is_match:
+                    # Dim non-matching cells
+                    cr.set_source_rgba(0, 0, 0, 0.5 * self.master_opacity)
+                    cr.rectangle(x, y, cw, ch)
+                    cr.fill()
+                    continue
+
+                if self.phase == 'filtered':
+                    # Highlight matching cells
+                    cr.set_source_rgba(*self._apply_opacity(self.highlight_color))
+                    cr.rectangle(x, y, cw, ch)
+                    cr.fill()
 
                 # Grid lines
                 cr.set_source_rgba(*self._apply_opacity(self.grid_color))
-                cr.set_line_width(1)
-                cr.rectangle(sx, sy, scw, sch)
+                cr.set_line_width(0.5)
+                cr.rectangle(x, y, cw, ch)
                 cr.stroke()
 
-                # Label
-                if idx < len(self.l2_keys):
-                    char = self.l2_keys[idx]
-                    self._draw_label(cr, char, sx, sy, scw, sch, l2_font_size, self.text_color)
-                idx += 1
+                # Draw label
+                if self.phase == 'filtered' and self.first_letter:
+                    # Show first letter dimmed, second letter bright
+                    self._draw_two_tone_label(cr, label, x, y, cw, ch, font_size)
+                else:
+                    self._draw_label(cr, label, x, y, cw, ch, font_size, self.text_color)
 
-    def _draw_subgrid(self, cr, cx, cy, cw, ch):
-        """Draw the subgrid inside a selected cell."""
-        scw = cw / self.sg_cols
-        sch = ch / self.sg_rows
+    def _draw_two_tone_label(self, cr, label, x, y, w, h, font_size):
+        """Draw label with first char dim and second char bright."""
+        cr.set_font_size(font_size)
+        ext_full = cr.text_extents(label)
+        ext_first = cr.text_extents(label[0])
 
-        sg_font_size = max(8, min(scw, sch) * 0.3 * self.sg_font_size_mult)
+        tx = x + (w - ext_full.width) / 2
+        ty = y + (h + ext_full.height) / 2
+
+        # First char (dim)
+        cr.set_source_rgba(*self._apply_opacity([1, 1, 1, 0.35]))
+        cr.move_to(tx, ty)
+        cr.show_text(label[0])
+
+        # Second char (bright)
+        cr.set_source_rgba(*self._apply_opacity(self.text_color))
+        cr.move_to(tx + ext_first.x_advance, ty)
+        cr.show_text(label[1])
+
+    def _draw_refine(self, cr):
+        """Draw refinement mode: selected cell highlighted, IJKL cross."""
+        rx, ry, rw, rh = self.sub_rect
+
+        # Dim everything outside
+        cr.set_source_rgba(0, 0, 0, 0.5 * self.master_opacity)
+        cr.rectangle(0, 0, self.screen_w, ry)
+        cr.fill()
+        cr.rectangle(0, ry + rh, self.screen_w, self.screen_h - ry - rh)
+        cr.fill()
+        cr.rectangle(0, ry, rx, rh)
+        cr.fill()
+        cr.rectangle(rx + rw, ry, self.screen_w - rx - rw, rh)
+        cr.fill()
+
+        # Highlight current rect
+        cr.set_source_rgba(*self._apply_opacity(self.highlight_color))
+        cr.rectangle(rx, ry, rw, rh)
+        cr.fill()
+
+        # Draw cross
+        mid_x = rx + rw / 2
+        mid_y = ry + rh / 2
+        cr.set_source_rgba(*self._apply_opacity(self.grid_color))
+        cr.set_line_width(self.grid_line_width + 1)
+        cr.move_to(mid_x, ry)
+        cr.line_to(mid_x, ry + rh)
+        cr.stroke()
+        cr.move_to(rx, mid_y)
+        cr.line_to(rx + rw, mid_y)
+        cr.stroke()
+
+        # Border
+        cr.set_line_width(self.grid_line_width)
+        cr.rectangle(rx, ry, rw, rh)
+        cr.stroke()
+
+        # Direction labels
+        hw = rw / 2
+        hh = rh / 2
+        font_size = max(12, min(hw, hh) * 0.25 * self.font_size_mult)
         weight = cairo.FONT_WEIGHT_BOLD if self.font_weight == 'bold' else cairo.FONT_WEIGHT_NORMAL
         cr.select_font_face(self.font_name, cairo.FONT_SLANT_NORMAL, weight)
-        cr.set_font_size(sg_font_size)
+        lh = font_size * 1.5
+        lw = font_size * 1.5
+        self._draw_label(cr, 'I', mid_x - lw/2, ry + hh*0.05, lw, lh, font_size, self.text_color)
+        self._draw_label(cr, 'K', mid_x - lw/2, ry + rh - lh - hh*0.05, lw, lh, font_size, self.text_color)
+        self._draw_label(cr, 'J', rx + hw*0.05, mid_y - lh/2, lw, lh, font_size, self.text_color)
+        self._draw_label(cr, 'L', rx + rw - lw - hw*0.05, mid_y - lh/2, lw, lh, font_size, self.text_color)
 
-        idx = 0
-        for r in range(self.sg_rows):
-            for c in range(self.sg_cols):
-                sx = cx + c * scw
-                sy = cy + r * sch
+        # Virtual cursor
+        if self.virtual_cursor_local:
+            self._draw_virtual_cursor(cr)
 
-                # Subgrid lines
-                cr.set_source_rgba(*self._apply_opacity(self.subgrid_color))
-                cr.set_line_width(1)
-                cr.rectangle(sx, sy, scw, sch)
-                cr.stroke()
-
-                # Subgrid label
-                if idx < len(self.sg_keys):
-                    char = self.sg_keys[idx]
-                    self._draw_label(cr, char, sx, sy, scw, sch, sg_font_size, self.sg_text_color)
-                idx += 1
-
-    def _draw_subgrid_faint(self, cr, cx, cy, cw, ch):
-        """Draw a faint subgrid (always_show_subgrid mode)."""
-        scw = cw / self.sg_cols
-        sch = ch / self.sg_rows
-        cr.set_source_rgba(*self._apply_opacity(self.subgrid_color[:3] + [self.subgrid_color[3] * 0.4]))
-        cr.set_line_width(0.5)
-        for r in range(1, self.sg_rows):
-            cr.move_to(cx, cy + r * sch)
-            cr.line_to(cx + cw, cy + r * sch)
-            cr.stroke()
-        for c in range(1, self.sg_cols):
-            cr.move_to(cx + c * scw, cy)
-            cr.line_to(cx + c * scw, cy + ch)
-            cr.stroke()
+        return False
 
     def _draw_label(self, cr, text, x, y, w, h, font_size, color):
         cr.set_font_size(font_size)
@@ -519,9 +413,6 @@ class GridOverlay(Gtk.Window):
 
     def _draw_virtual_cursor(self, cr):
         lx, ly = self.virtual_cursor_local
-        # Apply nudge offset
-        lx += self.nudge_offset[0]
-        ly += self.nudge_offset[1]
 
         size = self.cursor_size / 2
 
@@ -642,147 +533,110 @@ class GridOverlay(Gtk.Window):
             if self.action_type == 'move':
                 self.action_type = 'click'
 
-        # Nudge key release → execute at nudged position
-        if self.nudge_held_key is not None:
-            nk = key
-            if key == 'SEMICOLON':
-                nk = ';'
-            elif key == 'COMMA':
-                nk = ','
-            elif key == 'PERIOD':
-                nk = '.'
-            if nk == self.nudge_held_key:
-                self._execute_at_nudged_pos()
-                self.nudge_held_key = None
-                self.nudge_offset = (0, 0)
-                return True
-
         return True
 
     def _handle_grid_key(self, key, has_shift, has_alt):
-        """Process a grid/subgrid key press."""
-        if self.level == 0:
-            # Level 1 selection
-            if key in self.l1_key_map:
-                r, c = self.l1_key_map[key]
-                self.selected_cell = (r, c)
+        """Route key based on current phase."""
+        if self.phase == 'hints':
+            # First letter — filter to matching row
+            if key in self.row_keys:
+                self.first_letter = key
+                self.phase = 'filtered'
                 self.selected_keys.append(key)
-                self.level = 1
-
-                lx, ly = self._cell_center(r, c)
-                self.virtual_cursor_local = (lx, ly)
-                self.virtual_cursor = self._local_to_screen(lx, ly)
-
-                # If action level is "1", execute immediately
-                if self.action_level == '1' or self.action_level == 1:
-                    self._execute_action(has_shift, has_alt)
-                    return
-
                 self.queue_draw()
             return
 
-        elif self.level == 1 and self.has_l2:
-            # Level 2 selection (if configured)
-            if key in self.l2_key_map:
-                r2, c2 = self.l2_key_map[key]
-                self.selected_l2 = (r2, c2)
-                self.selected_keys.append(key)
-                self.level = 2
+        elif self.phase == 'filtered':
+            # Second letter — select cell
+            if key in self.col_keys and self.first_letter:
+                label = self.first_letter + key
+                if label in self.hint_reverse:
+                    r, c = self.hint_reverse[label]
+                    self.selected_keys.append(key)
 
-                # Calculate cursor position inside the level 2 subcell
-                cr, cc = self.selected_cell
-                lx, ly = self._l2_cell_center(cr, cc, r2, c2)
-                self.virtual_cursor_local = (lx, ly)
-                self.virtual_cursor = self._local_to_screen(lx, ly)
+                    # Position cursor at cell center
+                    lx = c * self.hint_cell_w + self.hint_cell_w / 2
+                    ly = r * self.hint_cell_h + self.hint_cell_h / 2
+                    self.virtual_cursor_local = (lx, ly)
+                    self.virtual_cursor = self._local_to_screen(lx, ly)
 
-                if self.action_level == '2' or self.action_level == 2:
-                    self._execute_action(has_shift, has_alt)
-                    return
-                self.queue_draw()
-            return
-
-        elif (self.level == 1 and not self.has_l2) or self.level == 2:
-            # Subgrid selection
-            if key in self.sg_key_map:
-                sg_r, sg_c = self.sg_key_map[key]
-                cr, cc = self.selected_cell
-
-                lx, ly = self._subcell_center(cr, cc, sg_r, sg_c)
-                self.virtual_cursor_local = (lx, ly)
-                self.virtual_cursor = self._local_to_screen(lx, ly)
-
-                # Nudge mode: hold subgrid key
-                if self.hold_for_nudge:
-                    self.nudge_held_key = key
-                    self.nudge_offset = (0, 0)
+                    # Set up refinement rect around the selected cell
+                    self.sub_rect = [c * self.hint_cell_w, r * self.hint_cell_h,
+                                     self.hint_cell_w, self.hint_cell_h]
+                    self.sub_level = 0
+                    self.phase = 'refine'
                     self.queue_draw()
-                    return
+            return
 
-                self._execute_action(has_shift, has_alt)
-                return
-            elif key in self.l1_key_map:
-                # Restart with new level-1 cell
-                self.level = 0
+        elif self.phase == 'refine':
+            # IJKL directional shrinking
+            if key in self.shrink_keys:
+                direction = self.shrink_keys[key]
+                rx, ry, rw, rh = self.sub_rect
+
+                if direction == 'up':
+                    rh = rh / 2
+                elif direction == 'down':
+                    ry = ry + rh / 2
+                    rh = rh / 2
+                elif direction == 'left':
+                    rw = rw / 2
+                elif direction == 'right':
+                    rx = rx + rw / 2
+                    rw = rw / 2
+
+                self.sub_rect = [rx, ry, rw, rh]
+                self.sub_level += 1
+                self.selected_keys.append(key)
+
+                lx = rx + rw / 2
+                ly = ry + rh / 2
+                self.virtual_cursor_local = (lx, ly)
+                self.virtual_cursor = self._local_to_screen(lx, ly)
+                self.queue_draw()
+            elif key in self.row_keys:
+                # Start over with a new hint selection
+                self.phase = 'hints'
+                self.first_letter = None
                 self.selected_keys = []
-                self.selected_cell = None
-                self.selected_l2 = None
+                self.sub_level = 0
                 self.virtual_cursor = None
                 self.virtual_cursor_local = None
-                self.nudge_offset = (0, 0)
                 self._handle_grid_key(key, has_shift, has_alt)
-                return
+            return
 
     def _undo_last_key(self):
-        if self.selected_keys:
-            self.selected_keys.pop()
-        if self.level > 0:
-            self.level -= 1
-        if self.level == 0:
-            self.selected_cell = None
-            self.selected_l2 = None
+        if not self.selected_keys:
+            return
+
+        self.selected_keys.pop()
+
+        if len(self.selected_keys) == 0:
+            # Back to initial hints
+            self.phase = 'hints'
+            self.first_letter = None
+            self.sub_level = 0
             self.virtual_cursor = None
             self.virtual_cursor_local = None
-        self.nudge_offset = (0, 0)
-        self.nudge_held_key = None
+        elif len(self.selected_keys) == 1:
+            # Back to filtered (first letter typed)
+            self.phase = 'filtered'
+            self.first_letter = self.selected_keys[0]
+            self.virtual_cursor = None
+            self.virtual_cursor_local = None
+        else:
+            # Replay hint selection + refinements
+            saved = self.selected_keys[:]
+            self.selected_keys = []
+            self.phase = 'hints'
+            self.first_letter = None
+            self.sub_level = 0
+            self.virtual_cursor = None
+            self.virtual_cursor_local = None
+            for k in saved:
+                self._handle_grid_key(k, False, False)
+
         self.queue_draw()
-
-    # ── Nudge handling ───────────────────────────────────────────
-
-    def handle_nudge(self, direction):
-        """Move virtual cursor by a nudge increment."""
-        if self.virtual_cursor_local is None or self.selected_cell is None:
-            return
-        cr, cc = self.selected_cell
-        _, _, cw, ch = self._cell_rect(cr, cc)
-        nudge_x = (cw / self.sg_cols) / self.nudges_per_cell
-        nudge_y = (ch / self.sg_rows) / self.nudges_per_cell
-
-        dx, dy = self.nudge_offset
-        if direction == 'up':
-            dy -= nudge_y
-        elif direction == 'down':
-            dy += nudge_y
-        elif direction == 'left':
-            dx -= nudge_x
-        elif direction == 'right':
-            dx += nudge_x
-        self.nudge_offset = (dx, dy)
-
-        # Update actual cursor position
-        lx, ly = self.virtual_cursor_local
-        sx, sy = self._local_to_screen(lx + dx, ly + dy)
-        self.mouse.move(sx, sy)
-        self.queue_draw()
-
-    def _execute_at_nudged_pos(self):
-        """Execute action at nudged virtual cursor position."""
-        if self.virtual_cursor_local is None:
-            return
-        lx, ly = self.virtual_cursor_local
-        dx, dy = self.nudge_offset
-        sx, sy = self._local_to_screen(lx + dx, ly + dy)
-        self.virtual_cursor = (sx, sy)
-        self._do_action(sx, sy)
 
     # ── Action execution ─────────────────────────────────────────
 
@@ -865,12 +719,11 @@ class GridOverlay(Gtk.Window):
 
     def _reset_selection_keep_cursor(self):
         """Reset grid selection but keep overlay up."""
-        self.level = 0
+        self.phase = 'hints'
+        self.first_letter = None
         self.selected_keys = []
-        self.selected_cell = None
-        self.selected_l2 = None
-        self.nudge_held_key = None
-        self.nudge_offset = (0, 0)
+        self.sub_rect = [0, 0, self.screen_w, self.screen_h]
+        self.sub_level = 0
 
     # ── Config editor ────────────────────────────────────────────
 

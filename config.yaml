@@ -29,12 +29,6 @@ keybindings:
   cycle_mouse_button: ""
   cycle_click_count: ""
 
-  # Subgrid nudge
-  subgrid_nudge_up: "I"
-  subgrid_nudge_down: "K"
-  subgrid_nudge_left: "J"
-  subgrid_nudge_right: "L"
-
   # Free mode
   toggle_free_mode: "ControlLeft tap"
   enter_free_mode: ""
@@ -61,31 +55,18 @@ keybindings:
   global_middle_click: ""
 
 # ─── Grid (overlay) options ──────────────────────────────────────
+# Two-letter hint grid: screen is covered with labeled cells (e.g. "AS", "AD").
+# Type 2 letters to jump cursor there, then IJKL to refine if needed.
+# Space to click at cursor position.
 grid:
-  configs:
-    - name: "default"
-      level1_columns: 10
-      level1_rows: 3
-      level1_keys: "QWERTYUIOPASDFGHJKL;ZXCVBNM,./"
-      level2_columns: 10
-      level2_rows: 3
-      level2_keys: "QWERTYUIOPASDFGHJKL;ZXCVBNM,./"
-      subgrid_columns: 3
-      subgrid_rows: 3
-      subgrid_keys: "UIOJKLM,."
-      always_show_subgrid: false
-      hold_subgrid_key_for_nudge: false
-      nudges_per_cell: 4
-
-  monitor_assignment_mode: "auto"    # auto | single | custom
-  custom_monitor_assignments: ""     # e.g. "default, vertical"
+  hint_cell_width: 80
+  hint_cell_height: 55
 
 # ─── Behavior ────────────────────────────────────────────────────
 behavior:
   # Overlay / cursor
   initial_overlay_monitor: "primary"
   initial_action_location: "virtual_cursor"   # virtual_cursor | system_cursor | screen_center
-  grid_action_level: "2"               # subgrid | 2 | 1
   hide_cursor_on_click: false
   hide_location: "bottom_left"
   continuous_mode: false

@@ -140,6 +140,7 @@ class Clickless:
         self.key_down_times = {}
         self.key_interrupted = set()
         self.pressed = set()
+        self.consumed_keys = set()  # keys consumed by overlay/free mode (eat their key-ups too)
 
         # Virtual keyboard for forwarding
         self.uinput = None
@@ -240,10 +241,17 @@ class Clickless:
                         if other != event.code and other in self.pressed:
                             self.key_interrupted.add(other)
                     consumed = self._on_key_down(event.code)
+                    if consumed:
+                        self.consumed_keys.add(event.code)
 
                 elif key_event.keystate == key_event.key_up:
                     self.pressed.discard(event.code)
+                    # Always eat key-ups for keys whose key-down was consumed
+                    was_consumed = event.code in self.consumed_keys
+                    self.consumed_keys.discard(event.code)
                     consumed = self._on_key_up(event.code)
+                    if not consumed and was_consumed:
+                        consumed = True
                     self.key_down_times.pop(event.code, None)
                     self.key_interrupted.discard(event.code)
 
@@ -375,13 +383,6 @@ class Clickless:
             if code in (ecodes.KEY_LEFTALT, ecodes.KEY_RIGHTALT):
                 if self.overlay.action_type == 'move':
                     self.overlay.action_type = 'click'
-            # Nudge release
-            if self.overlay.nudge_held_key is not None:
-                key_char = _evdev_to_grid_key(code)
-                if key_char and key_char == self.overlay.nudge_held_key:
-                    GLib.idle_add(self.overlay._execute_at_nudged_pos)
-                    self.overlay.nudge_held_key = None
-                    self.overlay.nudge_offset = (0, 0)
             return True  # Consume all key-ups while overlay is visible
 
         # ── Free mode active ──
