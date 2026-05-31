@@ -300,21 +300,18 @@ class FreeMode:
 
         # Calculate speed
         speed = self.base_speed
-        for _ in self.speed_keys:
+        for _ in list(self.speed_keys):
             speed *= self.speed_mult
         if self.speed_dec:
             speed /= self.speed_mult
 
         # Target velocity
         tx, ty = 0.0, 0.0
-        if 'up' in self.move_keys:
-            ty -= speed
-        if 'down' in self.move_keys:
-            ty += speed
-        if 'left' in self.move_keys:
-            tx -= speed
-        if 'right' in self.move_keys:
-            tx += speed
+        for d in list(self.move_keys):
+            if d == 'up':    ty -= speed
+            if d == 'down':  ty += speed
+            if d == 'left':  tx -= speed
+            if d == 'right': tx += speed
 
         # Easing
         self.move_velocity[0] += (tx - self.move_velocity[0]) * self.easing
@@ -328,15 +325,16 @@ class FreeMode:
             self.last_action_time = time.time()
 
         # Scrolling
-        if self.scroll_keys:
+        scroll_snapshot = list(self.scroll_keys)
+        if scroll_snapshot:
             scroll_speed = self.base_wheel
-            for _ in self.speed_keys:
+            for _ in list(self.speed_keys):
                 scroll_speed *= self.wheel_mult
             if self.speed_dec:
                 scroll_speed /= self.wheel_mult
             amount = max(1, int(scroll_speed))
 
-            for d in self.scroll_keys:
+            for d in scroll_snapshot:
                 if d in ('up', 'down'):
                     self.mouse.scroll(d, amount)
                 elif d == 'left':
