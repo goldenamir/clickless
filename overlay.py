@@ -180,6 +180,7 @@ class GridOverlay(Gtk.Window):
             self.show_overlay()
 
     def show_overlay(self):
+        self._start_monitor_idx = self.current_monitor_idx
         self._generate_hints()
         self._reset_state()
         self.is_visible = True
@@ -187,6 +188,22 @@ class GridOverlay(Gtk.Window):
         self.present()
         GLib.timeout_add(50, self._grab_keyboard)
         self.queue_draw()
+
+    def cycle_or_close(self):
+        """Advance grid to next monitor; hide after the last one."""
+        if len(self.monitors) < 2:
+            self.hide_overlay()
+            return
+        next_idx = (self.current_monitor_idx + 1) % len(self.monitors)
+        if next_idx == self._start_monitor_idx:
+            # We've cycled through all monitors → close
+            self.hide_overlay()
+        else:
+            self.current_monitor_idx = next_idx
+            self._apply_monitor_geometry()
+            self._generate_hints()
+            self._reset_state()
+            self.queue_draw()
 
     def hide_overlay(self):
         self._ungrab_keyboard()
