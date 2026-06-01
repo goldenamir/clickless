@@ -157,6 +157,7 @@ class FreeMode:
         self.move_keys.clear()
         self.speed_keys.clear()
         self.scroll_keys.clear()
+        self.mouse.cancel_drag()
         self._indicator.flash_off()
         print("Free mode OFF")
 
@@ -226,13 +227,25 @@ class FreeMode:
         if k == 'SPACE':
             self.mouse.click('left')
             return True
-        elif k == 'R':
-            self.mouse.click('right')
-            return True
         elif k == 'E':
             self.mouse.click('middle')
             return True
-        elif k == 'Q':
+
+        # Drag toggle (hold mouse button while moving)
+        if k == 'G':
+            if self.mouse.dragging:
+                self.mouse.end_drag('left')
+            else:
+                self.mouse.start_drag('left')
+            return True
+        elif k == 'R':
+            if self.mouse.dragging:
+                self.mouse.end_drag('right')
+            else:
+                self.mouse.start_drag('right')
+            return True
+
+        if k == 'Q':
             self.mouse.click('back')
             return True
         elif k == 'W':

@@ -112,16 +112,19 @@ def _evdev_to_grid_key(code):
     return {'SEMICOLON': ';', 'COMMA': ',', 'DOT': '.', 'SLASH': '/'}.get(name)
 
 
-def find_keyboard():
-    """Auto-detect the main keyboard device."""
+def find_keyboards():
+    """Auto-detect all keyboard devices (excluding our own virtual keyboard)."""
+    keyboards = []
     for path in evdev.list_devices():
         dev = evdev.InputDevice(path)
+        if 'clickless' in dev.name.lower():
+            continue
         caps = dev.capabilities()
         if ecodes.EV_KEY in caps:
             keys = caps[ecodes.EV_KEY]
             if ecodes.KEY_A in keys and ecodes.KEY_Z in keys:
-                return dev
-    return None
+                keyboards.append(dev)
+    return keyboards
 
 
 class Clickless:
@@ -163,22 +166,32 @@ class Clickless:
                     self.hotkeys[action_name] = p
 
     def _start_listener(self):
-        kbd = find_keyboard()
-        if kbd is None:
+        keyboards = find_keyboards()
+        if not keyboards:
             print("Error: no keyboard found. Are you in the 'input' group?")
             sys.exit(1)
-        self._kbd = kbd
-        print(f"Keyboard: {kbd.name} ({kbd.path})")
+        self._keyboards = keyboards
 
-        # Create virtual keyboard to forward non-consumed keys
-        caps = kbd.capabilities()
-        caps.pop(ecodes.EV_SYN, None)  # UInput adds SYN automatically
-        self.uinput = UInput(caps, name='clickless-virtual-kbd')
+        # Merge capabilities from all keyboards for the virtual keyboard
+        merged_caps = {}
+        for kbd in keyboards:
+            caps = kbd.capabilities()
+            caps.pop(ecodes.EV_SYN, None)
+            for ev_type, codes in caps.items():
+                if ev_type not in merged_caps:
+                    merged_caps[ev_type] = set()
+                merged_caps[ev_type].update(codes)
+        # Convert sets back to lists for UInput
+        merged_caps = {k: list(v) for k, v in merged_caps.items()}
+
+        self.uinput = UInput(merged_caps, name='clickless-virtual-kbd')
         print(f"Virtual keyboard: {self.uinput.name}")
 
-        # Grab the real keyboard exclusively
-        kbd.grab()
-        print("Keyboard grabbed (exclusive mode)")
+        for kbd in keyboards:
+            print(f"Keyboard: {kbd.name} ({kbd.path})")
+            kbd.grab()
+
+        print(f"Grabbed {len(keyboards)} keyboard(s) (exclusive mode)")
         print("SAFETY: Hold BOTH Shift keys for 1s → emergency ungrab + exit")
 
         # Safety: ungrab on exit/crash
@@ -186,17 +199,18 @@ class Clickless:
         signal.signal(signal.SIGTERM, self._signal_exit)
         signal.signal(signal.SIGHUP, self._signal_exit)
 
-        t = threading.Thread(target=self._listen_loop, args=(kbd,), daemon=True)
-        t.start()
+        for kbd in keyboards:
+            t = threading.Thread(target=self._listen_loop, args=(kbd,), daemon=True)
+            t.start()
 
     def _emergency_ungrab(self):
         """Release keyboard grab - called on exit/crash."""
-        try:
-            if self._kbd:
-                self._kbd.ungrab()
-                print("Keyboard ungrabbed (safety release)")
-        except Exception:
-            pass
+        for kbd in getattr(self, '_keyboards', []):
+            try:
+                kbd.ungrab()
+                print(f"Keyboard ungrabbed: {kbd.name}")
+            except Exception:
+                pass
 
     def _signal_exit(self, signum, frame):
         self._emergency_ungrab()
@@ -220,7 +234,11 @@ class Clickless:
                     both_shifts_since = time.time()
                 elif time.time() - both_shifts_since > 1.0:
                     print("\n*** PANIC: Both shifts held → ungrabbing keyboard ***")
-                    kbd.ungrab()
+                    for k in self._keyboards:
+                        try:
+                            k.ungrab()
+                        except Exception:
+                            pass
                     # Forward the shift releases so they don't stick
                     self.uinput.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
                     self.uinput.write(ecodes.EV_KEY, ecodes.KEY_RIGHTSHIFT, 0)
@@ -419,7 +437,7 @@ class Clickless:
             # Consume repeats for free mode keys
             k = key_name.upper()
             if k in ('I', 'K', 'J', 'L', 'S', 'D', 'F', 'A', 'M',
-                     'COMMA', 'PERIOD', 'SLASH', 'SPACE', 'R', 'E', 'Q', 'W'):
+                     'COMMA', 'PERIOD', 'SLASH', 'SPACE', 'R', 'E', 'Q', 'W', 'G', 'T'):
                 return True
         return False
 
