@@ -180,6 +180,8 @@ class GridOverlay(Gtk.Window):
             self.show_overlay()
 
     def show_overlay(self):
+        self._detect_monitors()
+        self._apply_monitor_geometry()
         self._start_monitor_idx = self.current_monitor_idx
         self._generate_hints()
         self._reset_state()
