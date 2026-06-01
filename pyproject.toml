@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "clickless"
+version = "0.1.0"
+description = "Free keyboard-driven mouse control for Linux"
+authors = ["clickless"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pyyaml = "^6.0"
+evdev = "^1.6"
+
+[tool.poetry.scripts]
+clickless = "main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
