@@ -201,10 +201,15 @@ class GridOverlay(Gtk.Window):
             # We've cycled through all monitors → close
             self.hide_overlay()
         else:
+            self._ungrab_keyboard()
+            self.hide()
             self.current_monitor_idx = next_idx
             self._apply_monitor_geometry()
             self._generate_hints()
             self._reset_state()
+            self.show_all()
+            self.present()
+            GLib.timeout_add(50, self._grab_keyboard)
             self.queue_draw()
 
     def hide_overlay(self):
