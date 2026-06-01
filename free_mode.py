@@ -43,7 +43,15 @@ class FreeModeIndicator(Gtk.Window):
 
     def _position_on_screen(self):
         display = Gdk.Display.get_default()
-        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        seat = display.get_default_seat()
+        pointer = seat.get_pointer() if seat else None
+        if pointer:
+            _, x, y = pointer.get_position()
+            monitor = display.get_monitor_at_point(x, y)
+        else:
+            monitor = None
+        if monitor is None:
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
         geom = monitor.get_geometry()
         self.move(geom.x + (geom.width - self._width) // 2, geom.y + 8)
 
@@ -77,6 +85,7 @@ class FreeModeIndicator(Gtk.Window):
     def show_on(self):
         self._text = "FREE MODE"
         self._color = (0.3, 1.0, 0.5, 0.9)
+        self._position_on_screen()
         self.show_all()
         self.queue_draw()
 
@@ -84,6 +93,7 @@ class FreeModeIndicator(Gtk.Window):
         """Briefly show 'FREE MODE OFF' then hide."""
         self._text = "FREE MODE OFF"
         self._color = (1.0, 0.4, 0.3, 0.9)
+        self._position_on_screen()
         self.show_all()
         self.queue_draw()
         GLib.timeout_add(800, self._hide_after_flash)

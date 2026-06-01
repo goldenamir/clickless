@@ -179,8 +179,17 @@ class GridOverlay(Gtk.Window):
         else:
             self.show_overlay()
 
+    def _monitor_for_cursor(self):
+        """Return monitor index containing the current mouse cursor."""
+        mx, my = self.mouse.get_position()
+        for i, m in enumerate(self.monitors):
+            if m['x'] <= mx < m['x'] + m['w'] and m['y'] <= my < m['y'] + m['h']:
+                return i
+        return self.current_monitor_idx
+
     def show_overlay(self):
         self._detect_monitors()
+        self.current_monitor_idx = self._monitor_for_cursor()
         self._apply_monitor_geometry()
         self._start_monitor_idx = self.current_monitor_idx
         self._generate_hints()
