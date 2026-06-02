@@ -113,17 +113,25 @@ def _evdev_to_grid_key(code):
 
 
 def find_keyboards():
-    """Auto-detect all keyboard devices (excluding our own virtual keyboard)."""
+    """Auto-detect all keyboard devices (excluding mice and our own virtual keyboard)."""
     keyboards = []
     for path in evdev.list_devices():
         dev = evdev.InputDevice(path)
         if 'clickless' in dev.name.lower():
             continue
         caps = dev.capabilities()
-        if ecodes.EV_KEY in caps:
-            keys = caps[ecodes.EV_KEY]
-            if ecodes.KEY_A in keys and ecodes.KEY_Z in keys:
-                keyboards.append(dev)
+        if ecodes.EV_KEY not in caps:
+            continue
+        keys = caps[ecodes.EV_KEY]
+        if ecodes.KEY_A not in keys or ecodes.KEY_Z not in keys:
+            continue
+        # Skip devices that are primarily mice (have relative axes + mouse buttons)
+        is_mouse = (ecodes.EV_REL in caps and
+                    ecodes.BTN_LEFT in keys and
+                    ecodes.REL_X in caps.get(ecodes.EV_REL, []))
+        if is_mouse:
+            continue
+        keyboards.append(dev)
     return keyboards
 
 
