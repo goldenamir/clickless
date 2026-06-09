@@ -8,6 +8,7 @@ Open the folder for your operating system:
 |----------|--------|------------|
 | macOS | `macos/` | `macos/README.md` |
 | Linux X11 | `linux/` | `linux/README.md` |
+| External ideas | `integrations/` | `integrations/README.md` |
 
 ## Quick Start
 
@@ -39,3 +40,11 @@ cd linux
 | Both Shift keys for 1 second | Emergency stop |
 
 See the platform README for system permissions and dependencies.
+
+## Integrations
+
+`integrations/handy` is a Git submodule for exploring voice control through Handy's offline speech-to-text app. Clone with submodules when you want that folder populated:
+
+```bash
+git clone --recurse-submodules https://github.com/goldenamir/clickless.git
+```

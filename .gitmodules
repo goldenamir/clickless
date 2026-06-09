@@ -1,0 +1,3 @@
+[submodule "integrations/handy"]
+	path = integrations/handy
+	url = https://github.com/cjpais/Handy.git
