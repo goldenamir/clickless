@@ -12,6 +12,7 @@ evdev = "^1.6"
 
 [tool.poetry.scripts]
 clickless = "main:main"
+clickless-linux = "main:main"
 
 [build-system]
 requires = ["poetry-core"]
