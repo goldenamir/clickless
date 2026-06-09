@@ -1,59 +1,41 @@
 # Clickless
 
-Free keyboard-driven mouse control for Linux. Inspired by [Mouseless](https://www.mouseless.click) and [mousemaster](https://github.com/petoncle/mousemaster).
+Free keyboard-driven mouse control, split by platform.
 
-## Features
+Open the folder for your operating system:
 
-- **Grid overlay** — Shift tap to activate. Type 2-letter label to jump cursor to that cell. Then IJKL to refine position. Space to click.
-- **Free mode** — Ctrl tap to activate. IJKL for continuous mouse movement with easing. Space to click.
-- **Multi-monitor** — Shift tap cycles monitors while overlay is open.
-- **Modifier clicks** — Hold Shift for right-click, Alt for move-only, Alt+Shift for drag & drop.
-- **Scrolling** — Arrow keys scroll while overlay is open. M/, in free mode.
+| Platform | Folder | Start here |
+|----------|--------|------------|
+| macOS | `macos/` | `macos/README.md` |
+| Linux X11 | `linux/` | `linux/README.md` |
 
-## Install
+## Quick Start
+
+macOS:
 
 ```bash
+cd macos
 ./install.sh
-```
-
-## Run
-
-```bash
 ./run.sh
 ```
 
-## Safety
+Linux:
 
-Hold **both Shift keys** for 1 second to emergency ungrab the keyboard and exit.
+```bash
+cd linux
+./install.sh
+./run.sh
+```
 
-## Keys (Grid Overlay)
-
-| Key | Action |
-|-----|--------|
-| Shift tap | Show/cycle monitor |
-| A-Z (1st letter) | Filter grid to matching row |
-| A-Z (2nd letter) | Jump cursor to that cell |
-| I / K / J / L | Refine: shrink up / down / left / right |
-| Space | Click at cursor position |
-| Backspace | Undo last keystroke |
-| Escape | Close overlay |
-
-## Keys (Free Mode)
+## Default Keys
 
 | Key | Action |
 |-----|--------|
-| Ctrl tap | Toggle free mode |
-| I / K / J / L | Move mouse: up / down / left / right |
-| S / D / F | Speed boost (stackable) |
-| A | Slow down |
-| Space | Click + exit |
+| Shift tap | Show/cycle grid overlay |
+| Ctrl tap | Toggle free mouse mode |
+| I / J / K / L | Move/refine cursor |
+| Space | Click |
+| Escape | Close overlay / exit mode |
+| Both Shift keys for 1 second | Emergency stop |
 
-## Requirements
-
-- Linux with X11
-- Python 3.10+
-- GTK 3, PyGObject, xdotool
-
-## License
-
-MIT
+See the platform README for system permissions and dependencies.
