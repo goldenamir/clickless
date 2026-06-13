@@ -1,10 +1,12 @@
 """Transparent AppKit overlay with Clickless hint grid for macOS."""
 
 import math
+import threading
 import time
 
 import AppKit
 import Foundation
+import Quartz
 import objc
 
 
@@ -145,6 +147,15 @@ class MacGridOverlay:
             height = float(frame.size.height)
             q_x = ns_x
             q_y = self._main_height - (ns_y + height)
+            q_w = width
+            q_h = height
+            display_id = screen.deviceDescription().get('NSScreenNumber')
+            if display_id is not None:
+                bounds = Quartz.CGDisplayBounds(int(display_id))
+                q_x = float(bounds.origin.x)
+                q_y = float(bounds.origin.y)
+                q_w = float(bounds.size.width)
+                q_h = float(bounds.size.height)
             is_primary = screen == main
             if is_primary:
                 primary_idx = idx
@@ -153,6 +164,8 @@ class MacGridOverlay:
                 'ns_y': ns_y,
                 'q_x': q_x,
                 'q_y': q_y,
+                'q_w': q_w,
+                'q_h': q_h,
                 'w': width,
                 'h': height,
                 'is_primary': is_primary,
@@ -164,6 +177,8 @@ class MacGridOverlay:
                 'ns_y': 0,
                 'q_x': 0,
                 'q_y': 0,
+                'q_w': 1440,
+                'q_h': 900,
                 'w': 1440,
                 'h': 900,
                 'is_primary': True,
@@ -174,6 +189,8 @@ class MacGridOverlay:
         monitor = self.monitors[self.current_monitor_idx]
         self.screen_x = monitor['q_x']
         self.screen_y = monitor['q_y']
+        self.quartz_w = monitor['q_w']
+        self.quartz_h = monitor['q_h']
         self.screen_w = int(monitor['w'])
         self.screen_h = int(monitor['h'])
         self.window.setFrame_display_(
@@ -184,8 +201,8 @@ class MacGridOverlay:
     def _monitor_for_cursor(self):
         mx, my = self.mouse.get_position()
         for idx, monitor in enumerate(self.monitors):
-            if (monitor['q_x'] <= mx < monitor['q_x'] + monitor['w']
-                    and monitor['q_y'] <= my < monitor['q_y'] + monitor['h']):
+            if (monitor['q_x'] <= mx < monitor['q_x'] + monitor['q_w']
+                    and monitor['q_y'] <= my < monitor['q_y'] + monitor['q_h']):
                 return idx
         return self.current_monitor_idx
 
@@ -262,7 +279,9 @@ class MacGridOverlay:
                 self.hint_reverse[label] = (row, col)
 
     def _local_to_screen(self, lx, ly):
-        return int(self.screen_x + lx), int(self.screen_y + ly)
+        sx = self.screen_x + (float(lx) / max(1, self.screen_w)) * self.quartz_w
+        sy = self.screen_y + (float(ly) / max(1, self.screen_h)) * self.quartz_h
+        return int(round(sx)), int(round(sy))
 
     def draw(self):
         _rgba([0, 0, 0, self.overlay_opacity], self.master_opacity).set()
@@ -516,8 +535,11 @@ class MacGridOverlay:
         elif self.initial_action_loc == 'screen_center':
             sx = self.screen_x + self.screen_w // 2
             sy = self.screen_y + self.screen_h // 2
-        else:
+        elif self.initial_action_loc == 'system_cursor':
             sx, sy = self.mouse.get_position()
+        else:
+            print('Grid: select a cell before pressing Space')
+            return
 
         if has_shift:
             self.mouse_button = 'right'
@@ -535,32 +557,55 @@ class MacGridOverlay:
         else:
             self.click_count = 1
         self.last_click_time = now
+        action_type = self.action_type
+        mouse_button = self.mouse_button
+        click_count = self.click_count
 
-        if self.action_type == 'move':
+        if action_type == 'click':
+            if self.continuous_mode:
+                self._finish_click(sx, sy, mouse_button, click_count)
+                self._reset_selection_keep_cursor()
+                self.queue_draw()
+            else:
+                self.hide_overlay()
+                self._schedule_click(sx, sy, mouse_button, click_count)
+            self.action_type = 'click'
+            self.mouse_button = 'left'
+            return
+
+        if action_type == 'move':
             self.mouse.move(sx, sy, self.move_duration)
-        elif self.action_type == 'drag':
+        elif action_type == 'drag':
             if not self.mouse.dragging:
                 self.mouse.move(sx, sy, self.move_duration)
-                self.mouse.start_drag(self.mouse_button)
+                self.mouse.start_drag(mouse_button)
                 self._reset_selection_keep_cursor()
                 self.queue_draw()
                 return
             self.mouse.move(sx, sy, self.move_duration)
-            self.mouse.end_drag(self.mouse_button)
-        else:
-            self.mouse.click_at(sx, sy, self.mouse_button, self.click_count)
-
-        if self.hide_cursor_on_click and self.action_type == 'click':
-            self.mouse.hide_cursor(self.screen_w, self.screen_h, self.hide_location)
-
+            self.mouse.end_drag(mouse_button)
         if self.continuous_mode:
             self._reset_selection_keep_cursor()
             self.queue_draw()
-        else:
+        elif self.is_visible:
             self.hide_overlay()
 
         self.action_type = 'click'
         self.mouse_button = 'left'
+
+    def _schedule_click(self, sx, sy, mouse_button, click_count):
+        timer = threading.Timer(
+            0.06,
+            self._finish_click,
+            args=(sx, sy, mouse_button, click_count),
+        )
+        timer.daemon = True
+        timer.start()
+
+    def _finish_click(self, sx, sy, mouse_button, click_count):
+        self.mouse.click_at(sx, sy, mouse_button, click_count)
+        if self.hide_cursor_on_click:
+            self.mouse.hide_cursor(self.screen_w, self.screen_h, self.hide_location)
 
     def _reset_selection_keep_cursor(self):
         self.phase = 'hints'

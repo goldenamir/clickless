@@ -334,6 +334,13 @@ class MacClickless:
             if is_tap and code in (LEFT_SHIFT, RIGHT_SHIFT):
                 self.overlay.cycle_or_close()
                 return True
+            if is_tap and code in (LEFT_CTRL, RIGHT_CTRL):
+                if self.free_mode.active:
+                    self.free_mode.active = False
+                    self.free_mode.finish_deactivate()
+                else:
+                    self.free_mode.activate()
+                return True
             if code in (LEFT_SHIFT, RIGHT_SHIFT):
                 self.overlay.mouse_button = 'left'
             if code in (LEFT_ALT, RIGHT_ALT):

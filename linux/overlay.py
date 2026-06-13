@@ -93,6 +93,7 @@ class GridOverlay(Gtk.Window):
         self.connect('draw', self._on_draw)
         self.connect('key-press-event', self._on_key_press)
         self.connect('key-release-event', self._on_key_release)
+        self.connect('realize', self._make_click_through)
 
     # ── Config loading ───────────────────────────────────────────
 
@@ -154,6 +155,10 @@ class GridOverlay(Gtk.Window):
         self.set_default_size(self.screen_w, self.screen_h)
         self.resize(self.screen_w, self.screen_h)
         self.move(self.screen_x, self.screen_y)
+
+    def _make_click_through(self, widget):
+        region = cairo.Region(cairo.RectangleInt(0, 0, 0, 0))
+        self.get_window().input_shape_combine_region(region, 0, 0)
 
     def move_to_next_monitor(self):
         if len(self.monitors) < 2:
@@ -699,8 +704,11 @@ class GridOverlay(Gtk.Window):
             if self.initial_action_loc == 'screen_center':
                 sx = self.screen_x + self.screen_w // 2
                 sy = self.screen_y + self.screen_h // 2
-            else:
+            elif self.initial_action_loc == 'system_cursor':
                 sx, sy = self.mouse.get_position()
+            else:
+                print("Grid: select a cell before pressing Space")
+                return
 
         if has_shift:
             self.mouse_button = 'right'
@@ -718,13 +726,28 @@ class GridOverlay(Gtk.Window):
         else:
             self.click_count = 1
         self.last_click_time = now
+        action_type = self.action_type
+        mouse_button = self.mouse_button
+        click_count = self.click_count
 
-        if self.action_type == 'move':
+        if action_type == 'click':
+            if self.continuous_mode:
+                self._finish_click(sx, sy, mouse_button, click_count)
+                self._reset_selection_keep_cursor()
+                self.queue_draw()
+            else:
+                self.hide_overlay()
+                GLib.timeout_add(60, self._finish_click, sx, sy, mouse_button, click_count)
+            self.action_type = 'click'
+            self.mouse_button = 'left'
+            return
+
+        if action_type == 'move':
             self.mouse.move(sx, sy, self.move_duration)
-        elif self.action_type == 'drag':
+        elif action_type == 'drag':
             if not self.mouse.dragging:
                 self.mouse.move(sx, sy, self.move_duration)
-                self.mouse.start_drag(self.mouse_button)
+                self.mouse.start_drag(mouse_button)
                 # Stay in overlay for drop target
                 self._reset_selection_keep_cursor()
                 self.queue_draw()
@@ -732,23 +755,24 @@ class GridOverlay(Gtk.Window):
             else:
                 # Drop
                 self.mouse.move(sx, sy, self.move_duration)
-                self.mouse.end_drag(self.mouse_button)
-        elif self.action_type == 'click':
-            self.mouse.click_at(sx, sy, self.mouse_button, self.click_count)
+                self.mouse.end_drag(mouse_button)
 
         # Post-action
-        if self.hide_cursor_on_click and self.action_type == 'click':
-            self.mouse.hide_cursor(self.screen_w, self.screen_h, self.hide_location)
-
         if self.continuous_mode:
             self._reset_selection_keep_cursor()
             self.queue_draw()
-        else:
+        elif self.is_visible:
             self.hide_overlay()
 
         # Reset action modifiers
         self.action_type = 'click'
         self.mouse_button = 'left'
+
+    def _finish_click(self, sx, sy, mouse_button, click_count):
+        self.mouse.click_at(sx, sy, mouse_button, click_count)
+        if self.hide_cursor_on_click:
+            self.mouse.hide_cursor(self.screen_w, self.screen_h, self.hide_location)
+        return False
 
     def _reset_selection_keep_cursor(self):
         """Reset grid selection but keep overlay up."""

@@ -1,0 +1,22 @@
+[project]
+name = "clickless-macos"
+version = "0.1.0"
+description = "Free keyboard-driven mouse control for macOS"
+authors = [
+    { name = "clickless" },
+]
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "pyyaml>=6.0,<7.0",
+    "pyobjc-framework-ApplicationServices",
+    "pyobjc-framework-Cocoa",
+    "pyobjc-framework-Quartz",
+]
+
+[project.scripts]
+clickless-macos = "mac_main:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

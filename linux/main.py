@@ -371,6 +371,14 @@ class Clickless:
             if is_tap and code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
                 GLib.idle_add(self.overlay.cycle_or_close)
                 return True
+            # Ctrl tap -> toggle free mode while keeping the grid overlay visible.
+            if is_tap and code in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
+                if self.free_mode.active:
+                    self.free_mode.active = False  # stop consuming keys immediately
+                    GLib.idle_add(self.free_mode.finish_deactivate)
+                else:
+                    GLib.idle_add(self.free_mode.activate)
+                return True
             # Modifier state updates
             if code in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
                 self.overlay.mouse_button = 'left'
