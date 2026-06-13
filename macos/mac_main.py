@@ -140,7 +140,7 @@ class MacClickless:
         )
         if self._event_tap is None:
             print('Error: could not create macOS keyboard event tap.')
-            print('Grant Accessibility permission to Terminal/iTerm/Codex, then run ./run_mac.sh again.')
+            print('Grant Accessibility permission to your terminal app, then run ./run_mac.sh again.')
             sys.exit(1)
 
         self._run_loop_source = CoreFoundation.CFMachPortCreateRunLoopSource(
@@ -407,7 +407,7 @@ def main():
 
     if not accessibility_trusted(prompt=True):
         print('macOS Accessibility permission is required.')
-        print('Open System Settings -> Privacy & Security -> Accessibility and enable your terminal/Codex app.')
+        print('Open System Settings -> Privacy & Security -> Accessibility and enable your terminal app.')
 
     ACTIVE_APP = MacClickless()
     ACTIVE_APP.run()
