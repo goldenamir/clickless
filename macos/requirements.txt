@@ -1,4 +1,0 @@
-pyyaml
-pyobjc-framework-ApplicationServices
-pyobjc-framework-Cocoa
-pyobjc-framework-Quartz

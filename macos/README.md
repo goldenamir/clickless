@@ -14,7 +14,7 @@ It uses:
 ./install.sh
 ```
 
-The installer creates a local virtual environment in `macos/.venv-macos`.
+The installer uses Poetry for Python dependency management.
 
 ## Required Permission
 
