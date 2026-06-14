@@ -269,6 +269,13 @@ class MacClickless:
     def _modifier_flag_down(self, mask):
         return bool(self.current_flags & mask)
 
+    def _suppress_shift_taps(self, duration=1.0):
+        self.suppress_shift_tap_until = time.time() + duration
+        for shift_code in (LEFT_SHIFT, RIGHT_SHIFT):
+            self.key_down_times.pop(shift_code, None)
+            self.key_interrupted.discard(shift_code)
+            self.consumed_keys.discard(shift_code)
+
     def _update_panic_timer(self):
         both_shifts = LEFT_SHIFT in self.pressed and RIGHT_SHIFT in self.pressed
         if both_shifts and self._panic_timer is None:
@@ -330,7 +337,7 @@ class MacClickless:
                 print('Config editor is GTK-only for now; edit config.yaml directly on macOS.')
                 return True
             if code == SPACE:
-                self.suppress_shift_tap_until = time.time() + 0.4
+                self._suppress_shift_taps()
                 self.overlay._execute_action_at_virtual_cursor(has_shift, has_alt)
                 return True
             if code == MAC_KEY_NAMES['UP']:
