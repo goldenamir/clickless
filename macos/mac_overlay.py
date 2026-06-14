@@ -57,6 +57,8 @@ class MacGridOverlay:
         self.first_letter = None
         self.selected_keys = []
 
+        self.hidden_at = 0.0
+        self.reopen_guard = 0.3
         self.hint_cols = 0
         self.hint_rows = 0
         self.hint_cell_w = 0
@@ -213,6 +215,11 @@ class MacGridOverlay:
             self.show_overlay()
 
     def show_overlay(self):
+        # Ignore reopen requests that arrive immediately after an action hid
+        # the grid (e.g. the Shift key-up that races a Space click). Without
+        # this guard the grid would reactivate itself on its own.
+        if time.time() - self.hidden_at < self.reopen_guard:
+            return
         self._detect_monitors()
         self.current_monitor_idx = self._monitor_for_cursor()
         self._apply_monitor_geometry()
@@ -240,6 +247,7 @@ class MacGridOverlay:
 
     def hide_overlay(self):
         self.is_visible = False
+        self.hidden_at = time.time()
         self._reset_state()
         self.window.orderOut_(None)
 

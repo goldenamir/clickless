@@ -105,7 +105,7 @@ class MacClickless:
         self.pressed = set()
         self.consumed_keys = set()
         self.current_flags = 0
-        self.suppress_shift_tap_until = 0
+        self.suppress_open_codes = set()
         self._panic_timer = None
         self._event_tap = None
         self._run_loop_source = None
@@ -269,13 +269,6 @@ class MacClickless:
     def _modifier_flag_down(self, mask):
         return bool(self.current_flags & mask)
 
-    def _suppress_shift_taps(self, duration=1.0):
-        self.suppress_shift_tap_until = time.time() + duration
-        for shift_code in (LEFT_SHIFT, RIGHT_SHIFT):
-            self.key_down_times.pop(shift_code, None)
-            self.key_interrupted.discard(shift_code)
-            self.consumed_keys.discard(shift_code)
-
     def _update_panic_timer(self):
         both_shifts = LEFT_SHIFT in self.pressed and RIGHT_SHIFT in self.pressed
         if both_shifts and self._panic_timer is None:
@@ -326,6 +319,11 @@ class MacClickless:
             has_shift = self._modifier_flag_down(Quartz.kCGEventFlagMaskShift)
             has_alt = self._modifier_flag_down(Quartz.kCGEventFlagMaskAlternate)
 
+            # A Shift/Ctrl pressed while the grid is open must never reopen it
+            # on release (e.g. when an action hides the grid before key-up).
+            if code in (LEFT_SHIFT, RIGHT_SHIFT, LEFT_CTRL, RIGHT_CTRL):
+                self.suppress_open_codes.add(code)
+
             if code == ESCAPE:
                 self.overlay.hide_overlay()
                 return True
@@ -337,7 +335,6 @@ class MacClickless:
                 print('Config editor is GTK-only for now; edit config.yaml directly on macOS.')
                 return True
             if code == SPACE:
-                self._suppress_shift_taps()
                 self.overlay._execute_action_at_virtual_cursor(has_shift, has_alt)
                 return True
             if code == MAC_KEY_NAMES['UP']:
@@ -378,6 +375,8 @@ class MacClickless:
 
     def _on_key_up(self, code):
         is_tap = self._is_tap(code)
+        blocked_open = code in self.suppress_open_codes
+        self.suppress_open_codes.discard(code)
 
         if self.overlay.is_visible:
             if is_tap and code in (LEFT_SHIFT, RIGHT_SHIFT):
@@ -407,7 +406,7 @@ class MacClickless:
                 return False
 
             if is_tap and code in (LEFT_SHIFT, RIGHT_SHIFT):
-                if time.time() < self.suppress_shift_tap_until:
+                if blocked_open:
                     return True
                 self.overlay.show_overlay()
                 return False
@@ -416,11 +415,13 @@ class MacClickless:
 
         if is_tap:
             if code in (LEFT_SHIFT, RIGHT_SHIFT):
-                if time.time() < self.suppress_shift_tap_until:
+                if blocked_open:
                     return True
                 self.overlay.show_overlay()
                 return False
             if code in (LEFT_CTRL, RIGHT_CTRL):
+                if blocked_open:
+                    return True
                 self.free_mode.activate()
                 return False
 
