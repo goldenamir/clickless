@@ -82,11 +82,12 @@ behavior:
     base_move_speed: 8
     move_speed_multiplier: 2.5
     movement_easing_factor: 0.28
-    base_wheel_speed: 5
+    base_wheel_speed: 1
     wheel_speed_multiplier: 3.0
     wheel_easing_factor: 0.2
     wheel_step_size: 3
     wheel_step_size_large: 10
+    wheel_interval_ms: 60         # delay between scroll steps (higher = slower)
     auto_off_seconds: 10           # 0 = disabled
 
 # ─── Style / Appearance ─────────────────────────────────────────

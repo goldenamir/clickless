@@ -166,6 +166,7 @@ class MacFreeMode:
         self.move_velocity = [0.0, 0.0]
         self.scroll_keys = set()
         self.last_action_time = 0
+        self._last_scroll_time = 0.0
         self._thread = None
         self._stop_event = threading.Event()
 
@@ -179,6 +180,10 @@ class MacFreeMode:
         self.wheel_easing = fm.get('wheel_easing_factor', 0.2)
         self.wheel_step = fm.get('wheel_step_size', 3)
         self.wheel_step_large = fm.get('wheel_step_size_large', 10)
+        # Minimum delay between scroll ticks (seconds). Without this, scrolling
+        # fires on every ~16ms loop tick, which makes paging up/down feel much
+        # too fast.
+        self.wheel_interval = fm.get('wheel_interval_ms', 60) / 1000.0
         self.auto_off_sec = fm.get('auto_off_seconds', 10)
 
     def activate(self):
@@ -356,13 +361,16 @@ class MacFreeMode:
 
         scroll_snapshot = list(self.scroll_keys)
         if scroll_snapshot:
-            scroll_speed = self.base_wheel
-            for _ in list(self.speed_keys):
-                scroll_speed *= self.wheel_mult
-            if self.speed_dec:
-                scroll_speed /= self.wheel_mult
-            amount = max(1, int(scroll_speed))
+            now = time.time()
+            if now - self._last_scroll_time >= self.wheel_interval:
+                self._last_scroll_time = now
+                scroll_speed = self.base_wheel
+                for _ in list(self.speed_keys):
+                    scroll_speed *= self.wheel_mult
+                if self.speed_dec:
+                    scroll_speed /= self.wheel_mult
+                amount = max(1, int(scroll_speed))
 
-            for direction in scroll_snapshot:
-                self.mouse.scroll(direction, amount)
-            self.last_action_time = time.time()
+                for direction in scroll_snapshot:
+                    self.mouse.scroll(direction, amount)
+                self.last_action_time = now
