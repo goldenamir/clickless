@@ -183,14 +183,49 @@ class MacClickless:
     def _handle_flags_changed(self, event):
         code = int(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode))
         flags = int(Quartz.CGEventGetFlags(event))
-        is_down = self._modifier_is_down(code, flags)
-        event_type = Quartz.kCGEventKeyDown if is_down else Quartz.kCGEventKeyUp
-        return self._handle_key_event(event_type, event, code_override=code)
+        modifier = self._modifier_info(code)
+        if modifier is None:
+            return self._handle_key_event(Quartz.kCGEventKeyDown, event, code_override=code)
 
-    def _modifier_is_down(self, code, flags):
-        if code in (LEFT_SHIFT, RIGHT_SHIFT, LEFT_CTRL, RIGHT_CTRL, LEFT_ALT, RIGHT_ALT):
-            return code not in self.pressed
-        return code not in self.pressed
+        mask, related_codes = modifier
+        is_down = bool(flags & mask)
+        if is_down:
+            other_is_pressed = any(
+                other != code and other in self.pressed for other in related_codes
+            )
+            if code in self.pressed and other_is_pressed:
+                return self._handle_key_event(
+                    Quartz.kCGEventKeyUp, event, code_override=code
+                )
+            if code in self.pressed and code in self.key_down_times:
+                return event
+
+            self.pressed.discard(code)
+            self.key_down_times.pop(code, None)
+            self.key_interrupted.discard(code)
+            self.consumed_keys.discard(code)
+            return self._handle_key_event(
+                Quartz.kCGEventKeyDown, event, code_override=code
+            )
+
+        result = event
+        for related_code in related_codes:
+            if related_code in self.pressed or related_code in self.key_down_times:
+                handled = self._handle_key_event(
+                    Quartz.kCGEventKeyUp, event, code_override=related_code
+                )
+                if handled is None:
+                    result = None
+        return result
+
+    def _modifier_info(self, code):
+        if code in (LEFT_SHIFT, RIGHT_SHIFT):
+            return Quartz.kCGEventFlagMaskShift, (LEFT_SHIFT, RIGHT_SHIFT)
+        if code in (LEFT_CTRL, RIGHT_CTRL):
+            return Quartz.kCGEventFlagMaskControl, (LEFT_CTRL, RIGHT_CTRL)
+        if code in (LEFT_ALT, RIGHT_ALT):
+            return Quartz.kCGEventFlagMaskAlternate, (LEFT_ALT, RIGHT_ALT)
+        return None
 
     def _handle_key_event(self, event_type, event, code_override=None):
         code = code_override
