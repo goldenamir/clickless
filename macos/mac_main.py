@@ -104,6 +104,7 @@ class MacClickless:
         self.key_interrupted = set()
         self.pressed = set()
         self.consumed_keys = set()
+        self.current_flags = 0
         self._panic_timer = None
         self._event_tap = None
         self._run_loop_source = None
@@ -231,6 +232,7 @@ class MacClickless:
         code = code_override
         if code is None:
             code = int(Quartz.CGEventGetIntegerValueField(event, Quartz.kCGKeyboardEventKeycode))
+        self.current_flags = int(Quartz.CGEventGetFlags(event))
 
         consumed = False
         if event_type == Quartz.kCGEventKeyDown:
@@ -262,6 +264,9 @@ class MacClickless:
             self.key_interrupted.discard(code)
 
         return None if consumed else event
+
+    def _modifier_flag_down(self, mask):
+        return bool(self.current_flags & mask)
 
     def _update_panic_timer(self):
         both_shifts = LEFT_SHIFT in self.pressed and RIGHT_SHIFT in self.pressed
@@ -310,8 +315,8 @@ class MacClickless:
 
     def _on_key_down(self, code):
         if self.overlay.is_visible:
-            has_shift = LEFT_SHIFT in self.pressed or RIGHT_SHIFT in self.pressed
-            has_alt = LEFT_ALT in self.pressed or RIGHT_ALT in self.pressed
+            has_shift = self._modifier_flag_down(Quartz.kCGEventFlagMaskShift)
+            has_alt = self._modifier_flag_down(Quartz.kCGEventFlagMaskAlternate)
 
             if code == ESCAPE:
                 self.overlay.hide_overlay()
