@@ -105,6 +105,7 @@ class MacClickless:
         self.pressed = set()
         self.consumed_keys = set()
         self.current_flags = 0
+        self.suppress_shift_tap_until = 0
         self._panic_timer = None
         self._event_tap = None
         self._run_loop_source = None
@@ -329,6 +330,7 @@ class MacClickless:
                 print('Config editor is GTK-only for now; edit config.yaml directly on macOS.')
                 return True
             if code == SPACE:
+                self.suppress_shift_tap_until = time.time() + 0.4
                 self.overlay._execute_action_at_virtual_cursor(has_shift, has_alt)
                 return True
             if code == MAC_KEY_NAMES['UP']:
@@ -398,6 +400,8 @@ class MacClickless:
                 return False
 
             if is_tap and code in (LEFT_SHIFT, RIGHT_SHIFT):
+                if time.time() < self.suppress_shift_tap_until:
+                    return True
                 self.overlay.show_overlay()
                 return False
 
@@ -405,6 +409,8 @@ class MacClickless:
 
         if is_tap:
             if code in (LEFT_SHIFT, RIGHT_SHIFT):
+                if time.time() < self.suppress_shift_tap_until:
+                    return True
                 self.overlay.show_overlay()
                 return False
             if code in (LEFT_CTRL, RIGHT_CTRL):
