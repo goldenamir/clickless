@@ -66,8 +66,8 @@ Free-mode speed is configured in `config.yaml`:
 ```yaml
 behavior:
   free_mode:
-    base_move_speed: 24
-    movement_easing_factor: 0.45
+    base_move_speed: 8
+    movement_easing_factor: 0.28
 ```
 
-Increase `base_move_speed` for a faster cursor, then restart Clickless.
+Increase `base_move_speed` for a faster cursor, or decrease it for a slower cursor, then restart Clickless.

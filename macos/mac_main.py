@@ -51,8 +51,21 @@ def load_config():
     user_config = os.path.expanduser('~/.config/clickless/config.yaml')
     if os.path.exists(user_config):
         config_path = user_config
-    with open(config_path) as file:
-        return yaml.safe_load(file)
+
+    # Read the whole file up front (with a few retries). When launched from
+    # launchd the first read of the config can intermittently fail with
+    # OSError(EDEADLK, "Resource deadlock avoided"); a short retry recovers
+    # it instead of letting the whole app crash on startup.
+    last_error = None
+    for attempt in range(5):
+        try:
+            with open(config_path, 'rb') as file:
+                raw = file.read()
+            return yaml.safe_load(raw)
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.1 * (attempt + 1))
+    raise last_error
 
 
 def run_on_main(callback):
