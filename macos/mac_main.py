@@ -25,6 +25,7 @@ from mac_free_mode import MacFreeMode
 from mac_keymap import (
     BACKSPACE,
     ESCAPE,
+    FUNCTION,
     LEFT_ALT,
     LEFT_CTRL,
     LEFT_SHIFT,
@@ -110,15 +111,21 @@ class MacClickless:
         self.free_mode = MacFreeMode(self.config, self.mouse)
         self.hotkeys = {}
         self._parse_keybindings()
+        self.free_mode_toggle_codes = self._hotkey_codes('toggle_free_mode')
 
         behavior = self.config.get('behavior', {})
         self.tap_threshold = behavior.get('tap_threshold_ms', 200) / 1000.0
+        free_mode_config = behavior.get('free_mode', {})
+        self.free_mode_toggle_hold_sec = free_mode_config.get('toggle_hold_ms', 350) / 1000.0
         self.key_down_times = {}
         self.key_interrupted = set()
         self.pressed = set()
         self.consumed_keys = set()
         self.current_flags = 0
         self.suppress_open_codes = set()
+        self._free_mode_toggle_timer = None
+        self._free_mode_toggle_hold_code = None
+        self._free_mode_toggle_hold_fired = False
         self._panic_timer = None
         self._event_tap = None
         self._run_loop_source = None
@@ -240,6 +247,8 @@ class MacClickless:
             return Quartz.kCGEventFlagMaskControl, (LEFT_CTRL, RIGHT_CTRL)
         if code in (LEFT_ALT, RIGHT_ALT):
             return Quartz.kCGEventFlagMaskAlternate, (LEFT_ALT, RIGHT_ALT)
+        if code == FUNCTION:
+            return Quartz.kCGEventFlagMaskSecondaryFn, (FUNCTION,)
         return None
 
     def _handle_key_event(self, event_type, event, code_override=None):
@@ -307,34 +316,91 @@ class MacClickless:
             return False
         return time.time() - down_time < self.tap_threshold
 
-    def _check_hotkey(self, action_name, code, is_tap_event=False):
+    def _check_hotkey(self, action_name, code, is_tap_event=False, is_hold_event=False):
         hotkey = self.hotkeys.get(action_name)
         if hotkey is None:
             return False
         if isinstance(hotkey, list):
-            return any(self._match_single(item, code, is_tap_event) for item in hotkey)
-        return self._match_single(hotkey, code, is_tap_event)
+            return any(
+                self._match_single(item, code, is_tap_event, is_hold_event)
+                for item in hotkey
+            )
+        return self._match_single(hotkey, code, is_tap_event, is_hold_event)
 
-    def _match_single(self, hotkey, code, is_tap_event):
+    def _hotkey_codes(self, action_name):
+        hotkey = self.hotkeys.get(action_name)
+        if hotkey is None:
+            return set()
+        if isinstance(hotkey, list):
+            return {item['code'] for item in hotkey if item['code'] is not None}
+        return {hotkey['code']} if hotkey['code'] is not None else set()
+
+    def _match_single(self, hotkey, code, is_tap_event, is_hold_event):
         if hotkey['code'] != code:
             return False
         if hotkey['is_tap'] and not is_tap_event:
             return False
+        if hotkey.get('is_hold') and not is_hold_event:
+            return False
         if not hotkey['is_tap'] and is_tap_event:
+            return False
+        if not hotkey.get('is_hold') and is_hold_event:
             return False
         for modifier_code in hotkey['modifiers']:
             if modifier_code not in self.pressed:
                 return False
         return True
 
+    def _start_free_mode_toggle_hold(self, code):
+        if not self._check_hotkey('toggle_free_mode', code, is_hold_event=True):
+            return False
+        self._cancel_free_mode_toggle_hold()
+        self._free_mode_toggle_hold_code = code
+        self._free_mode_toggle_hold_fired = False
+        self._free_mode_toggle_timer = threading.Timer(
+            self.free_mode_toggle_hold_sec,
+            self._fire_free_mode_toggle_hold,
+            args=(code,),
+        )
+        self._free_mode_toggle_timer.daemon = True
+        self._free_mode_toggle_timer.start()
+        return True
+
+    def _fire_free_mode_toggle_hold(self, code):
+        self._free_mode_toggle_timer = None
+        if code not in self.pressed:
+            return
+        self._free_mode_toggle_hold_fired = True
+        self.consumed_keys.add(code)
+        if self.free_mode.active:
+            self.free_mode.active = False
+            self.free_mode.finish_deactivate()
+        else:
+            self.free_mode.activate()
+
+    def _cancel_free_mode_toggle_hold(self):
+        if self._free_mode_toggle_timer is not None:
+            self._free_mode_toggle_timer.cancel()
+            self._free_mode_toggle_timer = None
+
+    def _finish_free_mode_toggle_hold(self, code):
+        if code != self._free_mode_toggle_hold_code:
+            return False
+        self._cancel_free_mode_toggle_hold()
+        fired = self._free_mode_toggle_hold_fired
+        self._free_mode_toggle_hold_code = None
+        self._free_mode_toggle_hold_fired = False
+        return fired
+
     def _on_key_down(self, code):
         if self.overlay.is_visible:
             has_shift = self._modifier_flag_down(Quartz.kCGEventFlagMaskShift)
             has_alt = self._modifier_flag_down(Quartz.kCGEventFlagMaskAlternate)
+            self._start_free_mode_toggle_hold(code)
 
-            # A Shift/Ctrl pressed while the grid is open must never reopen it
+            # A Shift/free-mode-toggle pressed while the grid is open must never reopen it
             # on release (e.g. when an action hides the grid before key-up).
-            if code in (LEFT_SHIFT, RIGHT_SHIFT, LEFT_CTRL, RIGHT_CTRL):
+            if code in (LEFT_SHIFT, RIGHT_SHIFT) or code in self.free_mode_toggle_codes:
                 self.suppress_open_codes.add(code)
 
             if code == ESCAPE:
@@ -370,6 +436,9 @@ class MacClickless:
             return True
 
         if self.free_mode.active:
+            if self._start_free_mode_toggle_hold(code):
+                return True
+
             key_name = MAC_CODE_NAMES.get(code, '')
             if code == SPACE:
                 self.free_mode.on_key_down(key_name)
@@ -384,18 +453,24 @@ class MacClickless:
                 return True
             return False
 
+        if self._start_free_mode_toggle_hold(code):
+            return False
+
         return False
 
     def _on_key_up(self, code):
         is_tap = self._is_tap(code)
+        hold_fired = self._finish_free_mode_toggle_hold(code)
         blocked_open = code in self.suppress_open_codes
         self.suppress_open_codes.discard(code)
+        if hold_fired:
+            return True
 
         if self.overlay.is_visible:
             if is_tap and code in (LEFT_SHIFT, RIGHT_SHIFT):
                 self.overlay.cycle_or_close()
                 return True
-            if is_tap and code in (LEFT_CTRL, RIGHT_CTRL):
+            if self._check_hotkey('toggle_free_mode', code, is_tap):
                 if self.free_mode.active:
                     self.free_mode.active = False
                     self.free_mode.finish_deactivate()
@@ -413,10 +488,10 @@ class MacClickless:
             key_name = MAC_CODE_NAMES.get(code, '')
             consumed = self.free_mode.on_key_up(key_name)
 
-            if is_tap and code in (LEFT_CTRL, RIGHT_CTRL):
+            if self._check_hotkey('toggle_free_mode', code, is_tap):
                 self.free_mode.active = False
                 self.free_mode.finish_deactivate()
-                return False
+                return True
 
             if is_tap and code in (LEFT_SHIFT, RIGHT_SHIFT):
                 if blocked_open:
@@ -432,11 +507,11 @@ class MacClickless:
                     return True
                 self.overlay.show_overlay()
                 return False
-            if code in (LEFT_CTRL, RIGHT_CTRL):
+            if self._check_hotkey('toggle_free_mode', code, is_tap):
                 if blocked_open:
                     return True
                 self.free_mode.activate()
-                return False
+                return True
 
         return False
 
@@ -455,7 +530,7 @@ class MacClickless:
     def run(self):
         print('Clickless running for macOS (Quartz event tap)')
         print('  Shift tap     -> toggle grid overlay / cycle monitors')
-        print('  Ctrl tap      -> toggle free mode')
+        print('  Fn/Globe hold -> toggle free mode')
         print('  Escape        -> dismiss overlay / exit free mode')
         print('  Safety        -> hold both Shift keys for 1s to exit')
         self.start_event_tap()

@@ -51,7 +51,7 @@ Stop the background job:
 | Key | Action |
 |-----|--------|
 | Shift tap | Show/cycle grid overlay |
-| Ctrl tap | Toggle free mouse mode |
+| Fn/Globe hold | Toggle free mouse mode |
 | I / J / K / L | Move/refine cursor |
 | S / D / F | Speed boost in free mode |
 | A | Slow down in free mode |
@@ -68,6 +68,7 @@ behavior:
   free_mode:
     base_move_speed: 8
     movement_easing_factor: 0.28
+    toggle_hold_ms: 350
 ```
 
 Increase `base_move_speed` for a faster cursor, or decrease it for a slower cursor, then restart Clickless.

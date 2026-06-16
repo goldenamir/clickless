@@ -66,6 +66,9 @@ MAC_KEY_NAMES = {
     'OPTIONRIGHT': 61,
     'CONTROLRIGHT': 62,
     'CTRLRIGHT': 62,
+    'FUNCTION': 63,
+    'FN': 63,
+    'GLOBE': 63,
     'CMDRIGHT': 54,
     'COMMANDRIGHT': 54,
     'METARIGHT': 54,
@@ -112,6 +115,7 @@ LEFT_CTRL = MAC_KEY_NAMES['CONTROLLEFT']
 RIGHT_CTRL = MAC_KEY_NAMES['CONTROLRIGHT']
 LEFT_ALT = MAC_KEY_NAMES['ALTLEFT']
 RIGHT_ALT = MAC_KEY_NAMES['ALTRIGHT']
+FUNCTION = MAC_KEY_NAMES['FUNCTION']
 SPACE = MAC_KEY_NAMES['SPACE']
 ESCAPE = MAC_KEY_NAMES['ESCAPE']
 BACKSPACE = MAC_KEY_NAMES['BACKSPACE']
@@ -123,11 +127,15 @@ def parse_hotkey_str(s):
         return None
     value = str(s).strip()
     is_tap = False
+    is_hold = False
     is_double_tap = False
     parts = value.split()
     if len(parts) >= 2:
         if parts[-1].lower() == 'tap':
             is_tap = True
+            value = ' '.join(parts[:-1])
+        elif parts[-1].lower() == 'hold':
+            is_hold = True
             value = ' '.join(parts[:-1])
         elif len(parts) >= 3 and parts[-1].lower() == 'tap' and parts[-2].lower() == 'double':
             is_double_tap = True
@@ -149,6 +157,7 @@ def parse_hotkey_str(s):
         'code': key_code,
         'modifiers': modifiers,
         'is_tap': is_tap,
+        'is_hold': is_hold,
         'is_double_tap': is_double_tap,
     }
 

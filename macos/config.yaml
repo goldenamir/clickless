@@ -30,7 +30,7 @@ keybindings:
   cycle_click_count: ""
 
   # Free mode
-  toggle_free_mode: "ControlLeft tap"
+  toggle_free_mode: "Globe hold"           # hold Fn/Globe for toggle_hold_ms
   enter_free_mode: ""
   exit_free_mode: ""
   free_move_up: "I"
@@ -88,6 +88,7 @@ behavior:
     wheel_step_size: 3
     wheel_step_size_large: 10
     wheel_interval_ms: 60         # delay between scroll steps (higher = slower)
+    toggle_hold_ms: 350           # hold Fn/Globe this long to toggle free mode
     auto_off_seconds: 10           # 0 = disabled
 
 # ─── Style / Appearance ─────────────────────────────────────────
