@@ -131,15 +131,16 @@ def parse_hotkey_str(s):
     is_double_tap = False
     parts = value.split()
     if len(parts) >= 2:
-        if parts[-1].lower() == 'tap':
+        # Check the two-word suffix first; plain "tap" would otherwise consume it.
+        if len(parts) >= 3 and parts[-1].lower() == 'tap' and parts[-2].lower() == 'double':
+            is_double_tap = True
+            value = ' '.join(parts[:-2])
+        elif parts[-1].lower() == 'tap':
             is_tap = True
             value = ' '.join(parts[:-1])
         elif parts[-1].lower() == 'hold':
             is_hold = True
             value = ' '.join(parts[:-1])
-        elif len(parts) >= 3 and parts[-1].lower() == 'tap' and parts[-2].lower() == 'double':
-            is_double_tap = True
-            value = ' '.join(parts[:-2])
 
     keys = [k.strip() for k in value.split('+') if k.strip()]
     if not keys:

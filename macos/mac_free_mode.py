@@ -4,6 +4,7 @@ import threading
 import time
 
 import AppKit
+import CoreFoundation
 import Foundation
 import objc
 
@@ -20,7 +21,13 @@ def _run_on_main(callback):
     if threading.current_thread() is threading.main_thread():
         callback()
     else:
-        Foundation.NSOperationQueue.mainQueue().addOperationWithBlock_(callback)
+        # Keep free-mode AppKit updates on the same CFRunLoop path used by mac_main.
+        CoreFoundation.CFRunLoopPerformBlock(
+            CoreFoundation.CFRunLoopGetMain(),
+            CoreFoundation.kCFRunLoopCommonModes,
+            callback,
+        )
+        CoreFoundation.CFRunLoopWakeUp(CoreFoundation.CFRunLoopGetMain())
 
 
 class MacFreeModeIndicatorView(AppKit.NSView):
@@ -156,6 +163,8 @@ class MacFreeMode:
 
     def __init__(self, config, mouse_ctrl):
         self.mouse = mouse_ctrl
+        # Free-mode state is shared by the AppKit event callback and tick thread.
+        self._state_lock = threading.Lock()
         self.active = False
         self._load_config(config)
         self._indicator = MacFreeModeIndicator()
@@ -186,191 +195,238 @@ class MacFreeMode:
         self.wheel_interval = fm.get('wheel_interval_ms', 60) / 1000.0
         self.auto_off_sec = fm.get('auto_off_seconds', 10)
 
-    def activate(self):
-        if self.active:
-            return
-        self.active = True
-        self.last_action_time = time.time()
+    def is_active(self):
+        with self._state_lock:
+            return self.active
+
+    def _clear_motion_state_locked(self):
         self.move_keys.clear()
         self.speed_keys.clear()
         self.scroll_keys.clear()
         self.speed_dec = False
         self.move_velocity = [0.0, 0.0]
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._tick_loop, daemon=True)
-        self._thread.start()
+
+    def _deactivate_current(self, stop_event=None, allow_inactive=False):
+        should_notify = False
+        with self._state_lock:
+            if stop_event is not None:
+                stop_event.set()
+                if stop_event is not self._stop_event:
+                    return False
+            else:
+                stop_event = self._stop_event
+            if not self.active and not allow_inactive:
+                return False
+            self.active = False
+            stop_event.set()
+            self._clear_motion_state_locked()
+            should_notify = True
+
+        if should_notify:
+            _run_on_main(self._indicator.flash_off)
+            print('Free mode OFF')
+        return False
+
+    def activate(self):
+        with self._state_lock:
+            if self.active:
+                return
+            self.active = True
+            self.last_action_time = time.time()
+            self._last_scroll_time = 0.0
+            self._clear_motion_state_locked()
+            # Each activation gets a fresh event so rapid off/on cannot clear the
+            # previous tick loop's already-set stop signal.
+            stop_event = threading.Event()
+            self._stop_event = stop_event
+            self._thread = threading.Thread(
+                target=self._tick_loop,
+                args=(stop_event,),
+                daemon=True,
+            )
+            thread = self._thread
+
+        thread.start()
         _run_on_main(self._indicator.show_on)
         print('Free mode ON')
 
     def deactivate(self):
-        if not self.active:
-            return
-        self.active = False
-        self.finish_deactivate()
+        return self._deactivate_current()
 
-    def finish_deactivate(self):
-        self._stop_event.set()
-        self.move_keys.clear()
-        self.speed_keys.clear()
-        self.scroll_keys.clear()
-        self.speed_dec = False
-        _run_on_main(self._indicator.flash_off)
-        print('Free mode OFF')
-        return False
+    def finish_deactivate(self, stop_event=None):
+        return self._deactivate_current(stop_event=stop_event, allow_inactive=True)
 
     def toggle(self):
-        if self.active:
+        if self.is_active():
             self.deactivate()
         else:
             self.activate()
 
     def on_key_down(self, key_name):
-        if not self.active:
-            return False
+        click_button = None
+        with self._state_lock:
+            if not self.active:
+                return False
 
-        self.last_action_time = time.time()
-        key = key_name.upper()
+            self.last_action_time = time.time()
+            key = key_name.upper()
 
-        if key == 'I':
-            self.move_keys.add('up')
-            return True
-        if key == 'K':
-            self.move_keys.add('down')
-            return True
-        if key == 'J':
-            self.move_keys.add('left')
-            return True
-        if key == 'L':
-            self.move_keys.add('right')
-            return True
+            if key == 'I':
+                self.move_keys.add('up')
+                return True
+            if key == 'K':
+                self.move_keys.add('down')
+                return True
+            if key == 'J':
+                self.move_keys.add('left')
+                return True
+            if key == 'L':
+                self.move_keys.add('right')
+                return True
 
-        if key in ('S', 'D', 'F'):
-            self.speed_keys.add(key)
-            return True
-        if key == 'A':
-            self.speed_dec = True
-            return True
+            if key in ('S', 'D', 'F'):
+                self.speed_keys.add(key)
+                return True
+            if key == 'A':
+                self.speed_dec = True
+                return True
 
-        if key == 'M':
-            self.scroll_keys.add('up')
-            return True
-        if key in (',', 'COMMA'):
-            self.scroll_keys.add('down')
-            return True
-        if key in ('.', 'DOT', 'PERIOD'):
-            self.scroll_keys.add('left')
-            return True
-        if key in ('/', 'SLASH'):
-            self.scroll_keys.add('right')
-            return True
+            if key == 'M':
+                self.scroll_keys.add('up')
+                return True
+            if key in (',', 'COMMA'):
+                self.scroll_keys.add('down')
+                return True
+            if key in ('.', 'DOT', 'PERIOD'):
+                self.scroll_keys.add('left')
+                return True
+            if key in ('/', 'SLASH'):
+                self.scroll_keys.add('right')
+                return True
 
-        if key == 'SPACE':
-            self.mouse.click('left')
-            return True
-        if key == 'R':
-            self.mouse.click('right')
-            return True
-        if key == 'E':
-            self.mouse.click('middle')
-            return True
-        if key == 'Q':
-            self.mouse.click('back')
-            return True
-        if key == 'W':
-            self.mouse.click('forward')
+            if key == 'SPACE':
+                click_button = 'left'
+            elif key == 'R':
+                click_button = 'right'
+            elif key == 'E':
+                click_button = 'middle'
+            elif key == 'Q':
+                click_button = 'back'
+            elif key == 'W':
+                click_button = 'forward'
+
+        if click_button is not None:
+            self.mouse.click(click_button)
             return True
 
         return False
 
     def on_key_up(self, key_name):
-        if not self.active:
+        with self._state_lock:
+            if not self.active:
+                return False
+
+            key = key_name.upper()
+            if key == 'I':
+                self.move_keys.discard('up')
+                return True
+            if key == 'K':
+                self.move_keys.discard('down')
+                return True
+            if key == 'J':
+                self.move_keys.discard('left')
+                return True
+            if key == 'L':
+                self.move_keys.discard('right')
+                return True
+
+            if key in ('S', 'D', 'F'):
+                self.speed_keys.discard(key)
+                return True
+            if key == 'A':
+                self.speed_dec = False
+                return True
+            if key == 'M':
+                self.scroll_keys.discard('up')
+                return True
+            if key in (',', 'COMMA'):
+                self.scroll_keys.discard('down')
+                return True
+            if key in ('.', 'DOT', 'PERIOD'):
+                self.scroll_keys.discard('left')
+                return True
+            if key in ('/', 'SLASH'):
+                self.scroll_keys.discard('right')
+                return True
             return False
 
-        key = key_name.upper()
-        if key == 'I':
-            self.move_keys.discard('up')
-            return True
-        if key == 'K':
-            self.move_keys.discard('down')
-            return True
-        if key == 'J':
-            self.move_keys.discard('left')
-            return True
-        if key == 'L':
-            self.move_keys.discard('right')
-            return True
-
-        if key in ('S', 'D', 'F'):
-            self.speed_keys.discard(key)
-            return True
-        if key == 'A':
-            self.speed_dec = False
-            return True
-        if key == 'M':
-            self.scroll_keys.discard('up')
-            return True
-        if key in (',', 'COMMA'):
-            self.scroll_keys.discard('down')
-            return True
-        if key in ('.', 'DOT', 'PERIOD'):
-            self.scroll_keys.discard('left')
-            return True
-        if key in ('/', 'SLASH'):
-            self.scroll_keys.discard('right')
-            return True
-        return False
-
-    def _tick_loop(self):
-        while not self._stop_event.wait(0.016):
-            if not self.active:
-                break
-            if self.auto_off_sec > 0:
-                idle = time.time() - self.last_action_time
-                if idle > self.auto_off_sec:
-                    self.active = False
-                    self.finish_deactivate()
+    def _tick_loop(self, stop_event):
+        while not stop_event.wait(0.016):
+            with self._state_lock:
+                if stop_event.is_set() or stop_event is not self._stop_event or not self.active:
                     break
-            self._tick()
+                idle_expired = (
+                    self.auto_off_sec > 0
+                    and time.time() - self.last_action_time > self.auto_off_sec
+                )
+            if idle_expired:
+                # Idle timeout deactivates only the activation owned by this tick loop.
+                self._deactivate_current(stop_event=stop_event)
+                break
+            self._tick(stop_event)
 
-    def _tick(self):
-        speed = self.base_speed
-        for _ in list(self.speed_keys):
-            speed *= self.speed_mult
-        if self.speed_dec:
-            speed /= self.speed_mult
+    def _tick(self, stop_event):
+        dx, dy = 0, 0
+        scroll_snapshot = ()
+        scroll_amount = 0
 
-        tx, ty = 0.0, 0.0
-        for direction in list(self.move_keys):
-            if direction == 'up':
-                ty -= speed
-            elif direction == 'down':
-                ty += speed
-            elif direction == 'left':
-                tx -= speed
-            elif direction == 'right':
-                tx += speed
+        with self._state_lock:
+            if stop_event.is_set() or stop_event is not self._stop_event or not self.active:
+                return
 
-        self.move_velocity[0] += (tx - self.move_velocity[0]) * self.easing
-        self.move_velocity[1] += (ty - self.move_velocity[1]) * self.easing
+            speed_snapshot = tuple(self.speed_keys)
+            speed_dec = self.speed_dec
+            speed = self.base_speed
+            for _ in speed_snapshot:
+                speed *= self.speed_mult
+            if speed_dec:
+                speed /= self.speed_mult
 
-        dx = int(round(self.move_velocity[0]))
-        dy = int(round(self.move_velocity[1]))
-        if dx != 0 or dy != 0:
-            self.mouse.move_relative(dx, dy)
-            self.last_action_time = time.time()
+            tx, ty = 0.0, 0.0
+            for direction in tuple(self.move_keys):
+                if direction == 'up':
+                    ty -= speed
+                elif direction == 'down':
+                    ty += speed
+                elif direction == 'left':
+                    tx -= speed
+                elif direction == 'right':
+                    tx += speed
 
-        scroll_snapshot = list(self.scroll_keys)
-        if scroll_snapshot:
+            self.move_velocity[0] += (tx - self.move_velocity[0]) * self.easing
+            self.move_velocity[1] += (ty - self.move_velocity[1]) * self.easing
+
+            dx = int(round(self.move_velocity[0]))
+            dy = int(round(self.move_velocity[1]))
             now = time.time()
-            if now - self._last_scroll_time >= self.wheel_interval:
+            if dx != 0 or dy != 0:
+                self.last_action_time = now
+
+            scroll_snapshot = tuple(self.scroll_keys)
+            if scroll_snapshot and now - self._last_scroll_time >= self.wheel_interval:
                 self._last_scroll_time = now
                 scroll_speed = self.base_wheel
-                for _ in list(self.speed_keys):
+                for _ in speed_snapshot:
                     scroll_speed *= self.wheel_mult
-                if self.speed_dec:
+                if speed_dec:
                     scroll_speed /= self.wheel_mult
-                amount = max(1, int(scroll_speed))
-
-                for direction in scroll_snapshot:
-                    self.mouse.scroll(direction, amount)
+                scroll_amount = max(1, int(scroll_speed))
                 self.last_action_time = now
+
+        if stop_event.is_set():
+            return
+        if dx != 0 or dy != 0:
+            self.mouse.move_relative(dx, dy)
+        if scroll_amount:
+            for direction in scroll_snapshot:
+                self.mouse.scroll(direction, scroll_amount)

@@ -372,9 +372,8 @@ class MacClickless:
             return
         self._free_mode_toggle_hold_fired = True
         self.consumed_keys.add(code)
-        if self.free_mode.active:
-            self.free_mode.active = False
-            self.free_mode.finish_deactivate()
+        if self.free_mode.is_active():
+            self.free_mode.deactivate()
         else:
             self.free_mode.activate()
 
@@ -435,21 +434,19 @@ class MacClickless:
                 return True
             return True
 
-        if self.free_mode.active:
+        if self.free_mode.is_active():
             if self._start_free_mode_toggle_hold(code):
                 return True
 
             key_name = MAC_CODE_NAMES.get(code, '')
             if code == SPACE:
                 self.free_mode.on_key_down(key_name)
-                self.free_mode.active = False
-                self.free_mode.finish_deactivate()
+                self.free_mode.deactivate()
                 return True
             if self.free_mode.on_key_down(key_name):
                 return True
             if code == ESCAPE:
-                self.free_mode.active = False
-                self.free_mode.finish_deactivate()
+                self.free_mode.deactivate()
                 return True
             return False
 
@@ -471,9 +468,8 @@ class MacClickless:
                 self.overlay.cycle_or_close()
                 return True
             if self._check_hotkey('toggle_free_mode', code, is_tap):
-                if self.free_mode.active:
-                    self.free_mode.active = False
-                    self.free_mode.finish_deactivate()
+                if self.free_mode.is_active():
+                    self.free_mode.deactivate()
                 else:
                     self.free_mode.activate()
                 return True
@@ -484,13 +480,12 @@ class MacClickless:
                     self.overlay.action_type = 'click'
             return True
 
-        if self.free_mode.active:
+        if self.free_mode.is_active():
             key_name = MAC_CODE_NAMES.get(code, '')
             consumed = self.free_mode.on_key_up(key_name)
 
             if self._check_hotkey('toggle_free_mode', code, is_tap):
-                self.free_mode.active = False
-                self.free_mode.finish_deactivate()
+                self.free_mode.deactivate()
                 return True
 
             if is_tap and code in (LEFT_SHIFT, RIGHT_SHIFT):
@@ -518,7 +513,7 @@ class MacClickless:
     def _on_key_hold(self, code):
         if self.overlay.is_visible:
             return True
-        if self.free_mode.active:
+        if self.free_mode.is_active():
             key_name = MAC_CODE_NAMES.get(code, '').upper()
             if key_name in (
                 'I', 'K', 'J', 'L', 'S', 'D', 'F', 'A', 'M',
