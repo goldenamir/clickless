@@ -205,73 +205,76 @@ class Clickless:
     def _listen_loop(self, kbd):
         both_shifts_since = None
 
-        for event in kbd.read_loop():
-            if event.type != ecodes.EV_KEY:
-                # Forward non-key events
-                self.uinput.write_event(event)
-                self.uinput.syn()
-                continue
-
-            # ── PANIC COMBO: both shifts held for 1 second → ungrab + exit ──
-            both_held = (ecodes.KEY_LEFTSHIFT in self.pressed and
-                         ecodes.KEY_RIGHTSHIFT in self.pressed)
-            if both_held:
-                if both_shifts_since is None:
-                    both_shifts_since = time.time()
-                elif time.time() - both_shifts_since > 1.0:
-                    print("\n*** PANIC: Both shifts held → ungrabbing keyboard ***")
-                    kbd.ungrab()
-                    # Forward the shift releases so they don't stick
-                    self.uinput.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
-                    self.uinput.write(ecodes.EV_KEY, ecodes.KEY_RIGHTSHIFT, 0)
-                    self.uinput.syn()
-                    os._exit(0)
-            else:
-                both_shifts_since = None
-
-            # ── Process the key event safely ──
-            try:
-                key_event = evdev.categorize(event)
-                consumed = False
-
-                if key_event.keystate == key_event.key_down:
-                    self.pressed.add(event.code)
-                    self.key_down_times[event.code] = time.time()
-                    for other in list(self.key_down_times.keys()):
-                        if other != event.code and other in self.pressed:
-                            self.key_interrupted.add(other)
-                    consumed = self._on_key_down(event.code)
-                    if consumed:
-                        self.consumed_keys.add(event.code)
-
-                elif key_event.keystate == key_event.key_up:
-                    self.pressed.discard(event.code)
-                    # Always eat key-ups for keys whose key-down was consumed
-                    was_consumed = event.code in self.consumed_keys
-                    self.consumed_keys.discard(event.code)
-                    consumed = self._on_key_up(event.code)
-                    if not consumed and was_consumed:
-                        consumed = True
-                    self.key_down_times.pop(event.code, None)
-                    self.key_interrupted.discard(event.code)
-
-                elif key_event.keystate == key_event.key_hold:
-                    consumed = self._on_key_hold(event.code)
-
-                # Forward to virtual keyboard if NOT consumed
-                if not consumed:
+        try:
+            for event in kbd.read_loop():
+                if event.type != ecodes.EV_KEY:
+                    # Forward non-key events
                     self.uinput.write_event(event)
                     self.uinput.syn()
+                    continue
 
-            except Exception as e:
-                # SAFETY: On ANY error, always forward the key so user isn't locked out
-                print(f"ERROR in key handler: {e}")
-                traceback.print_exc()
+                # ── PANIC COMBO: both shifts held for 1 second → ungrab + exit ──
+                both_held = (ecodes.KEY_LEFTSHIFT in self.pressed and
+                             ecodes.KEY_RIGHTSHIFT in self.pressed)
+                if both_held:
+                    if both_shifts_since is None:
+                        both_shifts_since = time.time()
+                    elif time.time() - both_shifts_since > 1.0:
+                        print("\n*** PANIC: Both shifts held → ungrabbing keyboard ***")
+                        kbd.ungrab()
+                        # Forward the shift releases so they don't stick
+                        self.uinput.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
+                        self.uinput.write(ecodes.EV_KEY, ecodes.KEY_RIGHTSHIFT, 0)
+                        self.uinput.syn()
+                        os._exit(0)
+                else:
+                    both_shifts_since = None
+
+                # ── Process the key event safely ──
                 try:
-                    self.uinput.write_event(event)
-                    self.uinput.syn()
-                except Exception:
-                    pass
+                    key_event = evdev.categorize(event)
+                    consumed = False
+
+                    if key_event.keystate == key_event.key_down:
+                        self.pressed.add(event.code)
+                        self.key_down_times[event.code] = time.time()
+                        for other in list(self.key_down_times.keys()):
+                            if other != event.code and other in self.pressed:
+                                self.key_interrupted.add(other)
+                        consumed = self._on_key_down(event.code)
+                        if consumed:
+                            self.consumed_keys.add(event.code)
+
+                    elif key_event.keystate == key_event.key_up:
+                        self.pressed.discard(event.code)
+                        # Always eat key-ups for keys whose key-down was consumed
+                        was_consumed = event.code in self.consumed_keys
+                        self.consumed_keys.discard(event.code)
+                        consumed = self._on_key_up(event.code)
+                        if not consumed and was_consumed:
+                            consumed = True
+                        self.key_down_times.pop(event.code, None)
+                        self.key_interrupted.discard(event.code)
+
+                    elif key_event.keystate == key_event.key_hold:
+                        consumed = self._on_key_hold(event.code)
+
+                    # Forward to virtual keyboard if NOT consumed
+                    if not consumed:
+                        self.uinput.write_event(event)
+                        self.uinput.syn()
+
+                except Exception as e:
+                    # SAFETY: On ANY error, always forward the key so user isn't locked out
+                    print(f"ERROR in key handler: {e}")
+                    traceback.print_exc()
+                    try:
+                        self.uinput.write_event(event)
+                        self.uinput.syn()
+                    except Exception:
+                        pass
+        except OSError as e:
+            print(f"Keyboard disconnected: {kbd.name} ({e})")
 
     def _is_tap(self, code):
         if code in self.key_interrupted:
