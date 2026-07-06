@@ -112,16 +112,48 @@ def _evdev_to_grid_key(code):
     return {'SEMICOLON': ';', 'COMMA': ',', 'DOT': '.', 'SLASH': '/'}.get(name)
 
 
-def find_keyboard():
-    """Auto-detect the main keyboard device."""
+def find_keyboards():
+    """Auto-detect real physical keyboards.
+
+    Excludes:
+      - Clickless's own virtual keyboard (avoids a self-feedback loop).
+      - Pointing devices (mice/touchpads) that also expose A-Z macro keys.
+      - Devices lacking the keys a real typing keyboard has.
+
+    Multiple event nodes belonging to the same physical keyboard are
+    de-duplicated, keeping the node that exposes the most keys (the real
+    typing node).
+    """
+    required = {ecodes.KEY_A, ecodes.KEY_Z, ecodes.KEY_SPACE,
+                ecodes.KEY_ENTER, ecodes.KEY_LEFTSHIFT}
+    candidates = []
     for path in evdev.list_devices():
-        dev = evdev.InputDevice(path)
+        try:
+            dev = evdev.InputDevice(path)
+        except OSError:
+            continue
+        # Never grab our own virtual keyboard - it would create a feedback loop
+        # and capture no real input.
+        if dev.name == 'clickless-virtual-kbd':
+            continue
         caps = dev.capabilities()
-        if ecodes.EV_KEY in caps:
-            keys = caps[ecodes.EV_KEY]
-            if ecodes.KEY_A in keys and ecodes.KEY_Z in keys:
-                return dev
-    return None
+        if ecodes.EV_KEY not in caps:
+            continue
+        keys = set(caps[ecodes.EV_KEY])
+        # Skip pointing devices (mice/touchpads) even if they report A-Z.
+        if ecodes.EV_REL in caps or ecodes.BTN_MOUSE in keys:
+            continue
+        if not required <= keys:
+            continue
+        candidates.append((dev, keys))
+
+    # De-duplicate multiple nodes of the same physical device by phys id.
+    best = {}
+    for dev, keys in candidates:
+        phys = dev.phys or dev.path
+        if phys not in best or len(keys) > len(best[phys][1]):
+            best[phys] = (dev, keys)
+    return [dev for dev, _ in best.values()]
 
 
 class Clickless:
@@ -163,22 +195,32 @@ class Clickless:
                     self.hotkeys[action_name] = p
 
     def _start_listener(self):
-        kbd = find_keyboard()
-        if kbd is None:
+        kbds = find_keyboards()
+        if not kbds:
             print("Error: no keyboard found. Are you in the 'input' group?")
             sys.exit(1)
-        self._kbd = kbd
-        print(f"Keyboard: {kbd.name} ({kbd.path})")
+        self._kbds = kbds
+        for kbd in kbds:
+            print(f"Keyboard: {kbd.name} ({kbd.path})")
 
-        # Create virtual keyboard to forward non-consumed keys
-        caps = kbd.capabilities()
-        caps.pop(ecodes.EV_SYN, None)  # UInput adds SYN automatically
-        self.uinput = UInput(caps, name='clickless-virtual-kbd')
+        # Build a virtual keyboard able to forward everything the real
+        # keyboards emit (union of their capabilities).
+        merged = {}
+        for kbd in kbds:
+            for ev_type, codes in kbd.capabilities().items():
+                if ev_type in (ecodes.EV_SYN, ecodes.EV_ABS, ecodes.EV_FF):
+                    continue  # SYN is auto-added; ABS/FF need special handling
+                bucket = merged.setdefault(ev_type, set())
+                for c in codes:
+                    bucket.add(c[0] if isinstance(c, tuple) else c)
+        merged = {t: sorted(v) for t, v in merged.items()}
+        self.uinput = UInput(merged, name='clickless-virtual-kbd')
         print(f"Virtual keyboard: {self.uinput.name}")
 
-        # Grab the real keyboard exclusively
-        kbd.grab()
-        print("Keyboard grabbed (exclusive mode)")
+        # Grab the real keyboards exclusively
+        for kbd in kbds:
+            kbd.grab()
+        print(f"Grabbed {len(kbds)} keyboard(s) (exclusive mode)")
         print("SAFETY: Hold BOTH Shift keys for 1s → emergency ungrab + exit")
 
         # Safety: ungrab on exit/crash
@@ -186,17 +228,18 @@ class Clickless:
         signal.signal(signal.SIGTERM, self._signal_exit)
         signal.signal(signal.SIGHUP, self._signal_exit)
 
-        t = threading.Thread(target=self._listen_loop, args=(kbd,), daemon=True)
-        t.start()
+        for kbd in kbds:
+            t = threading.Thread(target=self._listen_loop, args=(kbd,), daemon=True)
+            t.start()
 
     def _emergency_ungrab(self):
-        """Release keyboard grab - called on exit/crash."""
-        try:
-            if self._kbd:
-                self._kbd.ungrab()
-                print("Keyboard ungrabbed (safety release)")
-        except Exception:
-            pass
+        """Release keyboard grabs - called on exit/crash."""
+        for kbd in getattr(self, '_kbds', []):
+            try:
+                kbd.ungrab()
+            except Exception:
+                pass
+        print("Keyboard ungrabbed (safety release)")
 
     def _signal_exit(self, signum, frame):
         self._emergency_ungrab()
@@ -221,7 +264,11 @@ class Clickless:
                         both_shifts_since = time.time()
                     elif time.time() - both_shifts_since > 1.0:
                         print("\n*** PANIC: Both shifts held → ungrabbing keyboard ***")
-                        kbd.ungrab()
+                        for k in self._kbds:
+                            try:
+                                k.ungrab()
+                            except Exception:
+                                pass
                         # Forward the shift releases so they don't stick
                         self.uinput.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
                         self.uinput.write(ecodes.EV_KEY, ecodes.KEY_RIGHTSHIFT, 0)
