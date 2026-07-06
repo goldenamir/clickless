@@ -20,6 +20,9 @@ It uses:
 ./run.sh
 ```
 
+This starts Clickless in the background, so it keeps running after you close the terminal.
+Logs are written to `~/.local/state/clickless/linux.log`.
+
 ## Requirements
 
 - Linux with X11
